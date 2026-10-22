@@ -1,0 +1,13 @@
+build/
+lib/test/test_iir
+lib/test/test_pulse
+lib/test/test_apdbias
+lib/test/test_spiral
+*.o
+*.dSYM/
+.DS_Store
+# MPLAB X
+*.X/build/
+*.X/dist/
+*.X/debug/
+*.X/nbproject/private/

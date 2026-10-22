@@ -1,0 +1,17 @@
+# API reference: `make docs` (or `doxygen`), output in build/docs/html.
+PROJECT_NAME           = "LETS"
+PROJECT_BRIEF          = "Linux-like Embedded Task Scheduler"
+OUTPUT_DIRECTORY       = build/docs
+INPUT                  = README.md CONTRIBUTING.md kernel fsi argscript lib docs
+FILE_PATTERNS          = *.h *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */test/*
+USE_MDFILE_AS_MAINPAGE = README.md
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = YES
+MACRO_EXPANSION        = NO
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = YES
