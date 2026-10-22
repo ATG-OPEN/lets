@@ -111,4 +111,5 @@ The [Linux kernel coding style](https://www.kernel.org/doc/html/latest/process/c
 ## Licence
 
 Apache License 2.0, see [LICENSE](LICENSE). Contributions are welcome, see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md); security
+issues: [SECURITY.md](SECURITY.md).
