@@ -2,6 +2,7 @@ build/
 lib/test/test_iir
 lib/test/test_pulse
 lib/test/test_apdbias
+lib/test/test_apdcurrent
 lib/test/test_spiral
 *.o
 *.dSYM/
