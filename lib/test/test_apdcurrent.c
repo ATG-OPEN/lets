@@ -127,6 +127,22 @@ int main(void)
 	printf("apdcurrent: 1 uA in %.1f s at %.1f V, held %.2f uA\n", t1, c.apd, i1);
 	CHECK(fabsf(i1 - 1.0f) < 0.3f);
 
+	/* held without current measurements (an armed trigger): the supply settles on the result */
+	{
+		apdcurrent_t k = {0};
+		hv_t hk = {0};
+		calibrate(&k, &p, &hk, 1.0f, 0, 0, &now, 30);
+		for (int i = 0; i < 300; i++) {
+			hv_run(&hk, 0.1f);
+			now += 100000;
+			apdcurrent_hold(&k, &p, hk.v, now);
+			hk.sp = k.apd;
+		}
+		printf("apdcurrent: held 30 s without measuring: %.1f V (result %.1f V)\n", hk.v,
+		       k.result);
+		CHECK(fabsf(hk.v - k.result) < 0.3f);
+	}
+
 	/* LRF: 10 uA, starting from the trigger bias (recent offset reused, no discharge) */
 	float t10 = calibrate(&c, &p, &h, 10.0f, 0, 0, &now, 30);
 	float r10 = c.result;

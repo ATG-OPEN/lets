@@ -154,6 +154,49 @@ static void apdcurrent_trim(apdcurrent_t *c, const apdcurrent_params_t *p, float
 	c->want += apdcurrent_clamp(step, -limit, limit);
 }
 
+/*
+ * Outer loop: integrate what the supply still lacks, but only while it creeps (a jump in progress
+ * is the supply's own job, and integrating it would overshoot). Updates seconds apart take at
+ * most half the error each, so it still unwinds.
+ */
+static void apdcurrent_servo(apdcurrent_t *c, const apdcurrent_params_t *p, float apd_measured,
+			     float elapsed)
+{
+	float error_v = c->want - apd_measured;
+	float slew = elapsed > 0 ? (apd_measured - c->last_v) / elapsed : 0;
+
+	if (p->servo_gain > 0 && fabsf(error_v) < SERVO_WINDOW && fabsf(slew) < CREEP_RATE) {
+		float k = p->servo_gain * elapsed;
+
+		c->servo += (k < SERVO_STEP_MAX ? k : SERVO_STEP_MAX) * error_v;
+		c->servo = apdcurrent_clamp(c->servo, -p->servo_max, p->servo_max);
+	}
+}
+
+/* the set point from the wanted voltage and the outer loop, on a 0.1 V grid like the supply's */
+static uint8_t apdcurrent_apply(apdcurrent_t *c, const apdcurrent_params_t *p, float apd0)
+{
+	c->want = apdcurrent_clamp(c->want, p->apd_min, p->apd_max);
+	c->apd = apdcurrent_clamp(c->want + c->servo, p->apd_min, p->apd_max);
+	c->apd = roundf(c->apd * 10) / 10;
+	return c->apd != apd0;
+}
+
+uint8_t apdcurrent_hold(apdcurrent_t *c, const apdcurrent_params_t *p, float apd_measured,
+			uint64_t now)
+{
+	if (c->phase != APDCURRENT_TRACK)
+		return 0;
+
+	float apd0 = c->apd;
+	float elapsed = (float)(now - c->last_time) / US_PER_S;
+
+	c->last_time = now;
+	apdcurrent_servo(c, p, apd_measured, elapsed);
+	c->last_v = apd_measured;
+	return apdcurrent_apply(c, p, apd0);
+}
+
 uint8_t apdcurrent_update(apdcurrent_t *c, const apdcurrent_params_t *p, float level,
 			  float apd_measured, uint64_t now)
 {
@@ -221,22 +264,9 @@ uint8_t apdcurrent_update(apdcurrent_t *c, const apdcurrent_params_t *p, float l
 		    (float)(now - c->start_time) >= p->timeout * US_PER_S)
 			apdcurrent_finish(c, 0);
 
-		/* outer loop: integrate what the supply still lacks, but only while it creeps (a jump
-		   in progress is the supply's own job, and integrating it would overshoot). Updates
-		   seconds apart (tracking) take at most half the error each, so it still unwinds. */
-		float slew = elapsed > 0 ? (apd_measured - c->last_v) / elapsed : 0;
-		if (p->servo_gain > 0 && fabsf(error_v) < SERVO_WINDOW &&
-		    fabsf(slew) < CREEP_RATE) {
-			float k = p->servo_gain * elapsed;
-			c->servo += (k < SERVO_STEP_MAX ? k : SERVO_STEP_MAX) * error_v;
-			c->servo = apdcurrent_clamp(c->servo, -p->servo_max, p->servo_max);
-		}
+		apdcurrent_servo(c, p, apd_measured, elapsed);
 	}
 
 	c->last_v = apd_measured;
-	c->want = apdcurrent_clamp(c->want, p->apd_min, p->apd_max);
-	c->apd = apdcurrent_clamp(c->want + c->servo, p->apd_min, p->apd_max);
-	/* on a 0.1 V grid, like the supply's resolution */
-	c->apd = roundf(c->apd * 10) / 10;
-	return c->apd != apd0;
+	return apdcurrent_apply(c, p, apd0);
 }

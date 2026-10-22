@@ -169,4 +169,21 @@ float apdcurrent_of(const apdcurrent_t *c, const apdcurrent_params_t *p, float l
 uint8_t apdcurrent_update(apdcurrent_t *c, const apdcurrent_params_t *p, float level,
 			  float apd_measured, uint64_t now);
 
+/**
+ * @brief Holds the bias found by the calibration without measuring the
+ *        current (TRACK only).
+ * @param c            The controller.
+ * @param p            Its tuning.
+ * @param apd_measured Bias voltage measured now.
+ * @param now          Time in microseconds.
+ * @return 1 when the set point c->apd changed.
+ *
+ * Runs only the outer loop on the measured bias, so a slow supply settles
+ * on the calibrated voltage instead of the set point the search left
+ * behind. Call it often (every 100 ms, say) between current measurements,
+ * or instead of them when the bias must not follow the current.
+ */
+uint8_t apdcurrent_hold(apdcurrent_t *c, const apdcurrent_params_t *p, float apd_measured,
+			uint64_t now);
+
 #endif /* APDCURRENT_H */
