@@ -5,9 +5,9 @@
  * The shell: a task that reads one command line from stdin and runs it.
  */
 
-#include "../../fsi/fsi.h"
+#include "../fsi/fsi.h"
 
-#include "../task.h"
+#include "../kernel/task.h"
 
 #include "cat.h"
 #include "echo.h"

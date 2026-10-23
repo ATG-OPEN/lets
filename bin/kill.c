@@ -3,7 +3,7 @@
 
 #include "kill.h"
 
-#include "../task.h"
+#include "../kernel/task.h"
 
 #include <unistd.h>
 #include <string.h>

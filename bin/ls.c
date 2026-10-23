@@ -3,7 +3,7 @@
 
 #include "ls.h"
 
-#include "../../fsi/fsi.h"
+#include "../fsi/fsi.h"
 
 #include <unistd.h>
 #include <string.h>

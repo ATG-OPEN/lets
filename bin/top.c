@@ -3,8 +3,8 @@
 
 #include "top.h"
 
-#include "../task.h"
-#include "../alloc.h"
+#include "../kernel/task.h"
+#include "../kernel/alloc.h"
 
 #include <unistd.h>
 #include <string.h>

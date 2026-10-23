@@ -9,7 +9,7 @@
  */
 #include "../../kernel/task.h"
 #include "../../kernel/alloc.h"
-#include "../../kernel/bin/shell.h"
+#include "../../bin/shell.h"
 #include "../../fsi/fsi.h"
 #include "../../vfs/vfs.h"
 #include "../../vfs/dev/ramdisk.h"

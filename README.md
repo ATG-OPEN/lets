@@ -50,8 +50,8 @@ ID		NAME		RAM		DUR		PER
 
 ## On the MCU
 
-Add `kernel/`, `kernel/bin/`, `fsi/` and `lib/args.c` to your MPLAB X project (XC16), declare
-the heap once and boot:
+Add `kernel/`, `bin/`, `fsi/` and `lib/args.c` to your MPLAB X project (XC16), plus any
+`opt/` node your board uses, declare the heap once and boot:
 
 ```c
 ALLOC_INIT_HEAP(4096);
@@ -124,8 +124,9 @@ See [docs/kernel.md](docs/kernel.md) (rules: tasks, memory, nodes, commands, sty
 | Path | |
 |------|-|
 | `kernel/` | scheduler (`task`), heap (`alloc`), the C-library calls (`posix`) |
-| `kernel/bin/` | shell and its commands |
+| `bin/` | shell and its commands |
 | `fsi/` | the node table |
+| `opt/` | optional nodes for a board: `gpa` (a GPIO pin, ADC or DAC channel as a node, in physical units) |
 | `vfs/` | the virtual file system on the node table (`vfs`, `posix`, `bin`), the tiny file system (`tfs`), memory drivers (`dev/`) |
 | `argscript/` | the script language |
 | `lib/` | `args` (command-line parsing) and the portable libraries, see [lib/README.md](lib/README.md) |

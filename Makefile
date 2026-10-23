@@ -14,7 +14,7 @@ SAN     = -fsanitize=address,undefined
 PRELUDE = -include port/host/prelude.h
 
 KERNEL  = kernel/task.c kernel/alloc.c kernel/posix.c fsi/fsi.c lib/args.c \
-          $(wildcard kernel/bin/*.c)
+          $(wildcard bin/*.c)
 
 # the same with the virtual file system: vfs/posix.c instead of kernel/posix.c
 VFS     = $(filter-out kernel/posix.c,$(KERNEL)) $(wildcard vfs/*.c vfs/dev/*.c)
@@ -43,7 +43,7 @@ build/as_test: argscript/test/as_test.c argscript/argscript.c | build
 	$(CC) -std=c99 $(WARN) $(SAN) -include fcntl.h -Dopen=t_open -Dread=t_read -Dwrite=t_write \
 	    -Dclose=t_close -Dsystem=t_system argscript/test/as_test.c argscript/argscript.c -o $@
 
-LIBS    = $(filter-out lib/uuid.c,$(wildcard lib/*.c))
+LIBS    = $(filter-out lib/uuid.c,$(wildcard lib/*.c)) $(wildcard opt/*.c)
 
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done

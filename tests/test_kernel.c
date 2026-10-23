@@ -7,7 +7,7 @@
  */
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
-#include "../kernel/bin/shell.h"
+#include "../bin/shell.h"
 #include "../fsi/fsi.h"
 
 #include <time.h>

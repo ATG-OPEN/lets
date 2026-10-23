@@ -2,7 +2,7 @@
 PROJECT_NAME           = "LETS"
 PROJECT_BRIEF          = "Linux-like Embedded Task Scheduler"
 OUTPUT_DIRECTORY       = build/docs
-INPUT                  = README.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md kernel fsi vfs argscript lib docs
+INPUT                  = README.md CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md kernel bin fsi vfs opt argscript lib docs
 FILE_PATTERNS          = *.h *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */test/*

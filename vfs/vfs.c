@@ -15,7 +15,7 @@
 
 #include "vfs.h"
 
-#include "../kernel/bin/tmp.h"
+#include "../bin/tmp.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -26,7 +26,7 @@
 #define VFS_DEPTH_MAX 8u    /* deepest directory vfs_dir_path() prints */
 #define VFS_VIRTUAL   2u    /* /bin and /dev, listed first in / */
 
-extern fsi_handler_t tmp_node; /* kernel/bin/tmp.c: a RAM file */
+extern fsi_handler_t tmp_node; /* bin/tmp.c: a RAM file */
 
 static fsi_handler_t vfs_dir_handlers;
 static fsi_handler_t vfs_mnt_handlers;
