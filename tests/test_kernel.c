@@ -59,6 +59,32 @@ static int sink_read(void *args, void *buffer, unsigned int length)
 
 static fsi_handler_t sink_node = {.write_handler = sink_write, .read_handler = sink_read};
 
+/* a terminal: read() returns the keys given to type(), once; writes go to sink */
+static const char *keys = "";
+
+static int term_read(void *args, void *buffer, unsigned int length)
+{
+	(void)args;
+	unsigned n = (unsigned)strlen(keys);
+	if (n > length)
+		n = length;
+	memcpy(buffer, keys, n);
+	keys += n;
+	return (int)n;
+}
+
+static fsi_handler_t term_node = {.write_handler = sink_write, .read_handler = term_read};
+
+int shell_loop(void *args, uint64_t system_time); /* bin/shell.c: the shell task */
+
+/* types @p text on the terminal and lets the shell take all of it */
+static void type(const char *text)
+{
+	keys = text;
+	while (*keys != '\0')
+		shell_loop(NULL, 0);
+}
+
 /* -------------------------------------------------------------------------- */
 /* a command */
 
@@ -154,6 +180,39 @@ static int checks(void *args, uint64_t t)
 		CHECK(system("std sink") == 0);
 		CHECK(write(1, "line one\n", 9) == 9);
 		CHECK(strcmp(sink, "line one\n") == 0);
+
+		/* `std -t`: a person on a terminal - echo, editing, Tab, history, "\r\n" */
+		CHECK(fsi_node_create("term", false, NULL, &term_node) == 0);
+		CHECK(system("std -t term") == 0 && fsi_terminal());
+		sink_len = 0;
+		sink[0] = '\0';
+		type("pro\t"); /* the only name starting with "pro" */
+		CHECK(strcmp(sink, "> probe ") == 0);
+		type("x\r");
+		CHECK(last_argc == 2 && strcmp(last_arg, "x") == 0);
+		CHECK(strstr(sink, "> probe x\r\n") != NULL);
+		sink_len = 0;
+		type("/bin/prob\t\x15"); /* a path: the part after the last '/' */
+		CHECK(strstr(sink, "/bin/probe ") != NULL);
+		CHECK(fsi_node_create("prompt", false, NULL, &sink_node) == 0);
+		sink_len = 0;
+		type("pro\t"); /* probe, prompt: completes the common "pro" */
+		type("\t");    /* nothing more in common: lists both */
+		CHECK(strstr(sink, "probe  prompt  \r\n\r> pro") != NULL);
+		type("\x15probX\x7f"
+		     "e y\r\n"); /* Ctrl-U, typo, Backspace, "\r\n" Enter */
+		CHECK(last_argc == 2 && strcmp(last_arg, "y") == 0);
+		last_argc = 0;
+		type("probe zz\x03"); /* Ctrl-C drops the line */
+		CHECK(last_argc == 0);
+		type("\x1b[A\r"); /* Up: the last line run again */
+		CHECK(last_argc == 2 && strcmp(last_arg, "y") == 0);
+		sink_len = 0;
+		CHECK(write(1, "two\n", 4) == 4);
+		CHECK(strcmp(sink, "two\r\n") == 0);
+		CHECK(system("std sink") == 0 && !fsi_terminal());
+		sink_len = 0;
+		CHECK(write(1, "three\n", 6) == 6 && strcmp(sink, "three\n") == 0);
 		step = 2;
 		return 0;
 	}

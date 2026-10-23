@@ -9,6 +9,9 @@ board can be configured, tested and driven over a serial line without reflashing
   (ms). No stacks per task, no locks, nothing blocks.
 - **Everything is a node**: a UART, an ADC channel, a file in RAM or a command is a name in
   the node table; `ls` lists them, `std ttyS1` sends stdout there.
+- **A shell for people and programs**: `std -t ttyS1` gives a terminal with line editing,
+  Tab completion and history (use `screen`, PuTTY, ...); `std ttyS1` gives a program whole
+  command lines and plain replies.
 - **The C library, provided by the kernel**: `open`, `read`, `write`, `close`, `lseek`,
   `system`, `malloc`, `free` (XC16 links them from the kernel). A fixed heap with per-task
   ownership: when a task ends, its memory is freed.

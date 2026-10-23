@@ -89,10 +89,19 @@ int fsi_initialize(void);
 int fsi_register_app(char *name, int (*execute_handler)(void *args, int argc, char *argv[]));
 
 /**
- * @brief The `std <node>` command: redirects stdin / stdout / stderr.
+ * @brief The `std [-t] <node>` command: redirects stdin / stdout / stderr.
+ *
+ * With -t the node is a terminal that a person types on (screen, PuTTY, ...):
+ * the shell edits the line, echoes it and completes names with Tab, and
+ * stdout ends lines with "\r\n". Without it the node is a link to a program,
+ * which sends whole command lines and reads the replies unchanged.
+ *
  * @return 0, or -1 when the node does not exist.
  */
 int fsi_node_std_execute(void *args, int argc, char *argv[]);
+
+/** @brief true when the standard streams are a terminal (`std -t`). */
+bool fsi_terminal(void);
 
 /**
  * @brief Points stdin (0), stdout (1) and stderr (2) at node @p fd.

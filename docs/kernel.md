@@ -60,6 +60,9 @@ fsi_register_app(name, execute);                  // command
 ```
 
 - Handle `0/1/2` = stdin/stdout/stderr, set with `std <node>`.
+- `std -t <node>` makes the node a terminal for a person: the shell edits and echoes the line,
+  completes names with Tab, recalls lines with Up / Down, and stdout ends lines with `\r\n`.
+  Plain `std <node>` is for a program: whole lines in, replies out, no echo.
 - stdout is line buffered (128 B); a line is sent on `\n`.
 - `fsi_node_delete` does not free `args`. The creator owns them and frees them
   after the delete.

@@ -43,10 +43,17 @@ static fsi_node_t *posix_node(int handle)
 /* stdout is line buffered, as in kernel/posix.c */
 static int posix_stdout_write(fsi_node_t *n, const char *buffer, unsigned int len)
 {
+	bool crlf = fsi_terminal(); /* a terminal needs "\r\n" to start a line */
+
 	for (unsigned int i = 0; i < len; i++) {
+		if (buffer[i] == '\n' && crlf) {
+			posix_stdout_buf[posix_stdout_pos++] = '\r';
+		}
+
 		posix_stdout_buf[posix_stdout_pos++] = buffer[i];
 
-		if (buffer[i] != '\n' && posix_stdout_pos < POSIX_STDOUT_SIZE) {
+		/* pass the line on at '\n', or while room for "\r\n" remains */
+		if (buffer[i] != '\n' && posix_stdout_pos < POSIX_STDOUT_SIZE - 1) {
 			continue;
 		}
 

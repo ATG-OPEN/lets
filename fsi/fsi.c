@@ -67,19 +67,30 @@ int fsi_register_app(char *name, int (*execute_handler)(void *args, int argc, ch
 	return 0;
 }
 
+static bool fsi_std_terminal; /* std -t: a person on a terminal */
+
+bool fsi_terminal(void)
+{
+	return fsi_std_terminal;
+}
+
 int fsi_node_std_execute(void *args, int argc, char *argv[])
 {
-	if (argc != 2) {
+	bool terminal = (argc == 3 && strcmp(argv[1], "-t") == 0);
+
+	if (argc != 2 && !terminal) {
 		return -1;
 	}
 
-	int fd = open(argv[1], 0, 0);
+	int fd = open(argv[argc - 1], 0, 0);
 
 	if (fd < 0) {
 		return -1;
 	}
 
-	fsi_node_standard(fd);
+	if (fsi_node_standard(fd) == 0) {
+		fsi_std_terminal = terminal;
+	}
 
 	return close(fd);
 }
