@@ -8,13 +8,14 @@
  */
 
 #include "vfs.h"
+#include "../bin/tmp.h"
 
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define BIN_BUFFER_SIZE 64u /* bytes moved at a time by cat and cp */
+#define BIN_BUFFER_SIZE 64u  /* bytes moved at a time by cat and cp */
 #define BIN_LINE_SIZE	128u /* longest echo line */
 
 /* -------------------------------------------------------------------------- */
@@ -92,6 +93,12 @@ static int bin_ls(void *args, int argc, char *argv[])
 
 		if (p.kind == VFS_FILE && tfs_stat(vfs_mount_get(p.dir), p.name, &t) == 0) {
 			e.size = t.size;
+		} else if (p.kind == VFS_NODE) {
+			int size = tmp_file_size(&fsi_nodes_get()[p.node]);
+
+			if (size > 0) {
+				e.size = (uint32_t)size;
+			}
 		}
 
 		bin_ls_long(&e);

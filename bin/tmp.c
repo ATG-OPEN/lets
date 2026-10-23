@@ -112,3 +112,12 @@ int tmp_read(void *args, void *buffer, unsigned int length)
 
 	return length;
 }
+
+int tmp_file_size(const fsi_node_t *node)
+{
+	if (node == NULL || node->handlers != &tmp_node || node->args == NULL) {
+		return -1;
+	}
+
+	return ((const tmp_args_t *)node->args)->size;
+}

@@ -360,6 +360,12 @@ int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 		e->mount = (n->handlers == &vfs_mnt_handlers);
 		e->hidden = n->hidden;
 		e->node = (int16_t)k;
+
+		int size = tmp_file_size(n); /* a RAM file has a size too */
+
+		if (size > 0) {
+			e->size = (uint32_t)size;
+		}
 		return 0;
 	}
 

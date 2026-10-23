@@ -37,8 +37,8 @@ typedef struct {
 	bool eeprom;
 	uint16_t page;
 	bool selected, wel;
-	int busy;	/* status reads until a page write is done */
-	int count;	/* bytes since select */
+	int busy;  /* status reads until a page write is done */
+	int count; /* bytes since select */
 	uint8_t cmd;
 	uint32_t addr, base;
 	unsigned writes; /* page writes */
@@ -399,6 +399,21 @@ static void test_tree(void)
 	CHECK(system("touch /tmp/logs/a") == 0);
 	CHECK(system("echo hello > /tmp/logs/a") == 0);
 	CHECK(read_all("/tmp/logs/a", buf, sizeof(buf)) == 6 && strcmp(buf, "hello\n") == 0);
+	{
+		/* ls -l shows the bytes stored in a RAM file */
+		vfs_path_t d;
+		vfs_dirent_t e;
+		uint16_t index = 0;
+		uint32_t size = 0;
+
+		CHECK(vfs_resolve("/tmp/logs", &d) == 0 && d.kind == VFS_DIR);
+		while (vfs_dir_read(d.dir, &index, &e) == 0) {
+			if (strcmp(e.name, "a") == 0) {
+				size = e.size;
+			}
+		}
+		CHECK(size == 6);
+	}
 	CHECK(system("rm /tmp/logs") == -1); /* not empty */
 	CHECK(system("mv /tmp/logs/a /tmp/b") == 0 && read_all("/tmp/b", buf, sizeof(buf)) == 6);
 	CHECK(system("rm /tmp/b") == 0 && system("rm /tmp/logs") == 0);
