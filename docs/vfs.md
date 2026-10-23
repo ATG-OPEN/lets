@@ -6,8 +6,8 @@ fsi keeps working: drivers, apps, startup scripts, argscripts, `std ttyS1`, `ech
 
 ```text
 /
-├── bin/    commands: every node with an execute handler (fsi_register_app)
-├── dev/    devices: every other plain fsi node (ttyS1, ain1, lcd, ee0, ram1, ...)
+├── bin/    commands: every node that only executes (fsi_register_app)
+├── dev/    devices: every plain fsi node that can be read or written (ttyS1, led1, ain1, lcd, ee0, ...)
 ├── app/    project applications (vfs_register_app("/app/trgmon", ...))
 ├── tmp/    RAM files (touch), or a file system on SPI SRAM / a RAM disk mounted over it
 └── mnt/    mounted file systems: /mnt/ee on the SPI EEPROM (configs, scripts, firmware images)
@@ -26,8 +26,9 @@ A project links one of the two:
 
 Compatibility, both ways:
 
-- A node created with `fsi_node_create()` is in `/dev`. A command registered with
-  `fsi_register_app()` is in `/bin`. No code changes.
+- A node created with `fsi_node_create()` is in `/dev` (a device keeps its own commands, such as
+  `ttyS1 -b 115200`). A command registered with `fsi_register_app()` is in `/bin`. No code
+  changes.
 - A bare name that isn't in the working directory is looked up among all plain nodes, the same
   way fsi does it. `open("ttyS1", 0, 0)` works from any directory.
 - Code that walks `fsi_nodes_get()` still sees every node. A node in a vfs directory such as

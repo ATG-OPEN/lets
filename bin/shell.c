@@ -101,7 +101,7 @@ static const char *shell_node_name(int i)
 {
 	fsi_node_t *n = fsi_nodes_get() + i;
 
-	if (n->used != FSI_NODE_USED || n->name[0] == '\0') {
+	if (n->used != FSI_NODE_USED || n->handlers == NULL || n->name[0] == '\0') {
 		return NULL;
 	}
 
@@ -118,80 +118,127 @@ static const char *shell_node_name(int i)
 	return name;
 }
 
-static void shell_complete(void)
+void shell_node_names(const char *word, bool command, bool (*candidate)(const char *, bool))
 {
-	/* the word: from the last space (or the last '/' of a path) to the end of the line */
-	unsigned int start = shell.length;
-
-	while (start > 0 && shell_buffer[start - 1] != ' ' && shell_buffer[start - 1] != '/') {
-		start--;
-	}
-
-	const char *word = shell_buffer + start;
-	unsigned int typed = shell.length - start;
-	const char *first = NULL;
-	unsigned int common = 0; /* characters all the matches share */
-	int matches = 0;
-
 	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
 		const char *name = shell_node_name(i);
 
-		if (name == NULL || strncmp(name, word, typed) != 0) {
+		if (name == NULL) {
 			continue;
 		}
 
-		if (matches++ == 0) {
-			first = name;
-			common = strlen(name);
-		} else {
-			unsigned int k = typed;
-
-			while (k < common && name[k] == first[k]) {
-				k++;
-			}
-			common = k;
+		if (command && fsi_nodes_get()[i].handlers->execute_handler == NULL) {
+			continue; /* the first word is run: only what executes */
 		}
+
+		candidate(name, false);
+	}
+}
+
+static shell_names_t shell_names = shell_node_names;
+
+void shell_names_set(shell_names_t names)
+{
+	shell_names = (names != NULL) ? names : shell_node_names;
+}
+
+/* what Tab found so far: the names that start with what is typed */
+static struct {
+	const char *typed;   /* the part being completed (after the last ' ' or '/') */
+	unsigned int length; /* its characters */
+	bool listing;	     /* second pass: print the names */
+	int matches;	     /* names that match */
+	unsigned int common; /* characters all of them share */
+	bool dir;	     /* the one match is a directory */
+	char first[FSI_NODE_NAME_MAX_LENGTH]; /* the first match */
+} shell_tab;
+
+static bool shell_candidate(const char *name, bool dir)
+{
+	if (strncmp(name, shell_tab.typed, shell_tab.length) != 0) {
+		return false;
 	}
 
-	if (matches == 0) {
+	if (shell_tab.listing) {
+		shell_print(name);
+		shell_print(dir ? "/  " : "  ");
+		return true;
+	}
+
+	if (shell_tab.matches++ == 0) {
+		strncpy(shell_tab.first, name, sizeof(shell_tab.first) - 1);
+		shell_tab.first[sizeof(shell_tab.first) - 1] = '\0';
+		shell_tab.common = strlen(shell_tab.first);
+		shell_tab.dir = dir;
+	} else {
+		unsigned int k = shell_tab.length;
+
+		while (k < shell_tab.common && name[k] == shell_tab.first[k]) {
+			k++;
+		}
+		shell_tab.common = k;
+	}
+
+	return true;
+}
+
+static void shell_complete(void)
+{
+	/* the word: from the last space to the end of the line */
+	unsigned int word = shell.length;
+
+	while (word > 0 && shell_buffer[word - 1] != ' ') {
+		word--;
+	}
+
+	/* the part to complete: after the last '/' of the word */
+	unsigned int part = shell.length;
+
+	while (part > word && shell_buffer[part - 1] != '/') {
+		part--;
+	}
+
+	shell_buffer[shell.length] = '\0';
+
+	memset(&shell_tab, 0, sizeof(shell_tab));
+	shell_tab.typed = shell_buffer + part;
+	shell_tab.length = shell.length - part;
+
+	/* the first word, without a path, is a command */
+	bool command = (word == 0 && part == word);
+
+	shell_names(shell_buffer + word, command, shell_candidate);
+
+	if (shell_tab.matches == 0) {
 		return;
 	}
 
-	if (common > typed) {
-		/* add the shared part, and a space after a whole name */
-		unsigned int add = common - typed;
+	if (shell_tab.matches == 1 || shell_tab.common > shell_tab.length) {
+		/* add the shared part; after a whole name a space, or '/' for a directory */
+		unsigned int add = shell_tab.common - shell_tab.length;
+		const char *rest = shell_tab.first + shell_tab.length;
 
 		if (shell.length + add + 1 >= SHELL_BUFFER_SIZE) {
 			return;
 		}
 
-		memcpy(shell_buffer + shell.length, first + typed, add);
+		memcpy(shell_buffer + shell.length, rest, add);
 		shell.length += add;
-		write(2, (void *)(first + typed), add);
+		write(2, (void *)rest, add);
 
-		if (matches == 1) {
-			shell_buffer[shell.length++] = ' ';
-			shell_print(" ");
+		if (shell_tab.matches == 1) {
+			char end = shell_tab.dir ? '/' : ' ';
+
+			shell_buffer[shell.length++] = end;
+			write(2, &end, 1);
 		}
-		return;
-	}
-
-	if (matches == 1) {
 		return;
 	}
 
 	/* nothing more in common: list the choices, then the line again */
 	shell_print("\r\n");
-
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
-		const char *name = shell_node_name(i);
-
-		if (name != NULL && strncmp(name, word, typed) == 0) {
-			shell_print(name);
-			shell_print("  ");
-		}
-	}
-
+	shell_tab.listing = true;
+	shell_names(shell_buffer + word, command, shell_candidate);
 	shell_print("\r\n");
 	shell_redraw(0);
 }

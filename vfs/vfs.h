@@ -10,8 +10,9 @@
  * such as `ttyS1` and `std ttyS1` work as before, and a driver or an app
  * written for fsi runs on vfs unchanged. On top it adds:
  *
- *   /bin    the commands: every node with an execute handler (fsi_register_app)
- *   /dev    the devices: every other plain fsi node (ttyS1, ain1, ee0, ...)
+ *   /bin    the commands: every node that only executes (fsi_register_app)
+ *   /dev    the devices: every plain fsi node that can be read or written,
+ *           also when it takes commands too (ttyS1, a GPIO, ain1, ee0, ...)
  *   /app    project applications (vfs_register_app("/app/trgmon", ...))
  *   /tmp    RAM files (touch), or a file system mounted over it
  *   /mnt    mount points of file systems on SPI EEPROM / SRAM (mount ee0 /mnt/ee)
@@ -106,8 +107,8 @@ int vfs_resolve(const char *path, vfs_path_t *p);
 /**
  * @brief Adds a node at @p path (like fsi_node_create(), with a directory).
  *
- * In /bin and /dev, and for a bare name, it is a plain fsi node (in /bin when
- * it has an execute handler, else in /dev).
+ * In /bin and /dev, and for a bare name, it is a plain fsi node (in /dev when
+ * it has a read or a write handler, else in /bin).
  *
  * @return The node index, or -1.
  */

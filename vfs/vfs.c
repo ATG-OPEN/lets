@@ -6,7 +6,7 @@
  * a node's directory follows from its name and handlers:
  *
  *   name[0] & 0x80    in directory (name[0] & 0x7F), its name starts at name[1]
- *   plain name        in /bin with an execute handler, else in /dev
+ *   plain name        in /dev when it can be read or written, else in /bin
  *   name[0] == 0xFF   an open file (directory 0x7F, which never exists)
  *
  * Directories and mount points are nodes whose handlers are vfs_dir_handlers
@@ -59,7 +59,11 @@ static uint8_t vfs_parent(const fsi_node_t *n)
 		return (uint8_t)n->name[0] & (uint8_t)~VFS_PREFIX;
 	}
 
-	return (n->handlers->execute_handler != NULL) ? VFS_BIN : VFS_DEV;
+	/* a device (it can be read or written, maybe also commanded: ttyS1, a GPIO)
+	 * is in /dev; a node that is only a command is in /bin */
+	const fsi_handler_t *h = n->handlers;
+
+	return (h->read_handler != NULL || h->write_handler != NULL) ? VFS_DEV : VFS_BIN;
 }
 
 static const char *vfs_name(const fsi_node_t *n)

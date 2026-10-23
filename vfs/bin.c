@@ -8,6 +8,7 @@
  */
 
 #include "vfs.h"
+#include "../bin/shell.h"
 #include "../bin/tmp.h"
 
 #include <unistd.h>
@@ -515,8 +516,70 @@ static int bin_mkfs(void *args, int argc, char *argv[])
 
 /* -------------------------------------------------------------------------- */
 
+/* ------------------------------------------------------------------------ */
+/* Tab completion that follows the tree                                     */
+
+/* offers every entry of directory @p dir; returns how many matched */
+static int bin_names_in(uint8_t dir, bool (*candidate)(const char *, bool))
+{
+	vfs_dirent_t e;
+	uint16_t index = 0;
+	int matched = 0;
+
+	while (vfs_dir_read(dir, &index, &e) == 0) {
+		/* as ls shows them: hidden nodes only in /bin, where the commands are */
+		if (e.hidden && dir != VFS_BIN) {
+			continue;
+		}
+
+		if (candidate(e.name, e.kind == VFS_DIR)) {
+			matched++;
+		}
+	}
+
+	return matched;
+}
+
+/*
+ * A word with a '/' completes in the directory it names (`../`, `/dev/t`,
+ * `logs/a`). The first word without one is a command. Any other word
+ * completes in the working directory, or, when nothing there matches, with
+ * the bare names fsi finds from anywhere (`std tt` -> ttyS1).
+ */
+static void bin_names(const char *word, bool command, bool (*candidate)(const char *, bool))
+{
+	const char *slash = strrchr(word, '/');
+
+	if (slash == NULL) {
+		if (command || bin_names_in(vfs_cwd(), candidate) == 0) {
+			shell_node_names(word, command, candidate);
+		}
+		return;
+	}
+
+	char dir[VFS_PATH_MAX];
+	size_t length = (size_t)(slash - word);
+
+	if (length == 0) {
+		strcpy(dir, "/");
+	} else if (length < sizeof(dir)) {
+		memcpy(dir, word, length);
+		dir[length] = '\0';
+	} else {
+		return;
+	}
+
+	vfs_path_t p;
+
+	if (vfs_resolve(dir, &p) == 0 && p.kind == VFS_DIR) {
+		bin_names_in(p.dir, candidate);
+	}
+}
+
 int vfs_bin_initialize(void)
 {
+	shell_names_set(bin_names);
+
 	vfs_app_set("ls", bin_ls);
 	vfs_app_set("cat", bin_cat);
 	vfs_app_set("echo", bin_echo);

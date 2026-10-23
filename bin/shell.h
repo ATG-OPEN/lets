@@ -4,6 +4,7 @@
 #ifndef SHELL_H
 #define SHELL_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /**
@@ -25,5 +26,28 @@
  * @return 0.
  */
 int shell_initialize(void *args);
+
+/**
+ * @brief Lists the names Tab may complete a word with.
+ * @param word      The word being completed, as typed (it may be a path).
+ * @param command   true for the first word of the line (a command to run).
+ * @param candidate Call it with each name (the last part of a path only) and
+ *                  whether it is a directory; it returns true when the name
+ *                  starts with what is typed.
+ */
+typedef void (*shell_names_t)(const char *word, bool command,
+			      bool (*candidate)(const char *name, bool dir));
+
+/**
+ * @brief The default: every name in the node table (for a command, the ones
+ *        that execute). Directories are not known here.
+ */
+void shell_node_names(const char *word, bool command, bool (*candidate)(const char *, bool));
+
+/**
+ * @brief Replaces the names Tab uses, e.g. with ones that follow the
+ *        directories of vfs (vfs_bin_initialize() does it). NULL: the default.
+ */
+void shell_names_set(shell_names_t names);
 
 #endif /* SHELL_H */

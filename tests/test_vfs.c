@@ -330,7 +330,82 @@ static int sink_write(void *args, void *buffer, unsigned int length)
 
 static fsi_handler_t sink_node = {.write_handler = sink_write};
 
+/* a terminal for the shell: read() returns the keys given to type(), the echo goes to screen */
+static const char *keys = "";
+static char screen[512];
+static unsigned screen_len;
+
+static int term_read(void *args, void *buffer, unsigned int length)
+{
+	(void)args;
+	unsigned n = (unsigned)strlen(keys);
+	if (n > length)
+		n = length;
+	memcpy(buffer, keys, n);
+	keys += n;
+	return (int)n;
+}
+
+static int term_write(void *args, void *buffer, unsigned int length)
+{
+	(void)args;
+	if (screen_len + length < sizeof(screen)) {
+		memcpy(screen + screen_len, buffer, length);
+		screen_len += length;
+		screen[screen_len] = '\0';
+	}
+	return (int)length;
+}
+
+static fsi_handler_t term_node = {.read_handler = term_read, .write_handler = term_write};
+
+int shell_loop(void *args, uint64_t system_time); /* bin/shell.c: the shell task */
+
+/* types @p text (then Ctrl-U, so the line is empty again) and returns what was shown */
+static const char *type(const char *text)
+{
+	screen_len = 0;
+	screen[0] = '\0';
+	keys = text;
+	while (*keys != '\0')
+		shell_loop(NULL, 0);
+
+	static char shown[sizeof(screen)];
+	strcpy(shown, screen);
+	keys = "\x15";
+	shell_loop(NULL, 0);
+	return shown;
+}
+
 static int last_argc;
+static int cmd_probe(void *args, int argc, char *argv[]);
+
+static int gpio_value;
+
+static int gpio_read(void *args, void *buffer, unsigned int length)
+{
+	(void)args;
+	memcpy(buffer, &gpio_value, sizeof(gpio_value));
+	return (int)length;
+}
+
+static fsi_handler_t gpio_node = {
+	.read_handler = gpio_read, .write_handler = sink_write, .execute_handler = cmd_probe};
+
+/* true when directory @p path lists @p name */
+static bool dir_has(const char *path, const char *name)
+{
+	vfs_path_t d;
+	vfs_dirent_t e;
+	uint16_t index = 0;
+
+	if (vfs_resolve(path, &d) != 0 || d.kind != VFS_DIR)
+		return false;
+	while (vfs_dir_read(d.dir, &index, &e) == 0)
+		if (strcmp(e.name, name) == 0)
+			return true;
+	return false;
+}
 static int cmd_probe(void *args, int argc, char *argv[])
 {
 	last_argc = argc;
@@ -455,6 +530,45 @@ static void test_tree(void)
 	CHECK(system("ls -l") == 1);
 	CHECK(system("ls /") == 5); /* bin dev app tmp mnt */
 	CHECK(system("cd /") == 0);
+
+	/* a device that also takes commands (a GPIO, ttyS1 -b) is in /dev, not /bin */
+	CHECK(fsi_node_create("led1", false, NULL, &gpio_node) == 0);
+	CHECK(dir_has("/dev", "led1") && dir_has("/dev", "ttyS1") && dir_has("/dev", "ee0"));
+	CHECK(!dir_has("/bin", "led1") && !dir_has("/bin", "ttyS1"));
+	CHECK(dir_has("/bin", "probe") && dir_has("/bin", "ls") && !dir_has("/dev", "probe"));
+	CHECK(system("led1 on") == 7 && last_argc == 2);
+	CHECK(system("/dev/led1 a b") == 7 && last_argc == 3);
+	CHECK(system("/bin/led1 on") == -1);
+
+	/* Tab on a terminal follows the tree */
+	CHECK(fsi_node_create("term", false, NULL, &term_node) == 0);
+	CHECK(system("std -t term") == 0);
+	CHECK(strcmp(type("pro\t"), "> probe ") == 0);	     /* a command */
+	CHECK(strcmp(type("/app/to\t"), "/app/tool ") == 0); /* a command by path */
+	CHECK(strcmp(type("ls /tm\t"), "ls /tmp/") == 0);    /* a directory gets a '/' */
+	CHECK(strcmp(type("ls /dev/tt\t"), "ls /dev/ttyS1 ") == 0);
+	CHECK(strcmp(type("ls /dev/le\t"), "ls /dev/led1 ") == 0);
+	CHECK(strcmp(type("ls /mnt/ee/r\t"), "ls /mnt/ee/rc ") == 0); /* a file system */
+	CHECK(strcmp(type("ls /nothing/x\t"), "ls /nothing/x") == 0);
+	CHECK(strcmp(type("cat /tmp/bo\t"), "cat /tmp/boot.as ") == 0);
+	type("cd /tmp/\r"); /* the '/' Tab leaves is fine for cd */
+	CHECK(vfs_dir_path(vfs_cwd(), buf, sizeof(buf)) == 0 && strcmp(buf, "/tmp") == 0);
+	CHECK(strcmp(type("cat bo\t"), "cat boot.as ") == 0); /* the working directory */
+	CHECK(strcmp(type("std tt\t"), "std ttyS1 ") == 0);   /* not here: a bare fsi name */
+	const char *s = type("ls ../\t");		      /* the directory one up only */
+	CHECK(strstr(s, "\r\nbin/  dev/  app/  tmp/  mnt/  \r\n") != NULL);
+	CHECK(strstr(s, "probe") == NULL && strstr(s, "ttyS1") == NULL);
+	CHECK(strcmp(type("ls ../m\t"), "ls ../mnt/") == 0);
+	CHECK(strcmp(type("ls ../mnt/\t"), "ls ../mnt/ee/") == 0); /* the only entry */
+	s = type("ls /dev/\t");
+	CHECK(strstr(s, "ttyS1  ") != NULL && strstr(s, "led1  ") != NULL &&
+	      strstr(s, "ee0  ") != NULL && strstr(s, "probe") == NULL);
+	s = type("ls /bin/l\t"); /* ls only: led1 is in /dev */
+	CHECK(strcmp(s, "ls /bin/ls ") == 0);
+	type("cd ..\r");
+	CHECK(vfs_cwd() == VFS_ROOT);
+	CHECK(strcmp(type("ls de\t"), "ls dev/") == 0); /* /bin and /dev are in / */
+	CHECK(system("std ttyS1") == 0);
 
 	/* a firmware image through open / write / lseek, bigger than a 16-bit int */
 	int fd = open("/mnt/ee/fw.bin", O_WRONLY | O_CREAT | O_TRUNC, 0);

@@ -194,7 +194,13 @@ static int checks(void *args, uint64_t t)
 		sink_len = 0;
 		type("/bin/prob\t\x15"); /* a path: the part after the last '/' */
 		CHECK(strstr(sink, "/bin/probe ") != NULL);
-		CHECK(fsi_node_create("prompt", false, NULL, &sink_node) == 0);
+		CHECK(fsi_register_app("prompt", cmd_probe) == 0);
+		sink_len = 0;
+		type("si\t\x15"); /* the first word: only what executes, so not sink */
+		CHECK(strncmp(sink, "si\r", 3) == 0); /* nothing added */
+		sink_len = 0;
+		type("probe si\t\x15"); /* an argument: any node */
+		CHECK(strstr(sink, "probe sink ") != NULL);
 		sink_len = 0;
 		type("pro\t"); /* probe, prompt: completes the common "pro" */
 		type("\t");    /* nothing more in common: lists both */
