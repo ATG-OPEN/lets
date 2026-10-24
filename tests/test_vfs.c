@@ -684,6 +684,26 @@ static void test_tree(void)
 	CHECK(vfs_rename("/app/d1/d2", "/app/d3") == 0 && vfs_rename("/app/d1", "/app/d1/x") == -1);
 	CHECK(vfs_remove("/app/d1") == 0 && vfs_remove("/app/d3") == 0);
 
+	/* ed: one line per command */
+	CHECK(fsi_register_app("ed", vfs_ed) == 0);
+	CHECK(system("ed ~/new 0a put led1 1") == 0);		 /* a new file */
+	CHECK(system("ed ~/new 1a wait 500") == 0);		 /* after line 1 */
+	CHECK(system("ed ~/new 2a put led1 0") == 0);		 /* at the end */
+	CHECK(system("ed ~/new 1i \"# a  comment\"") == 0);	 /* before line 1, quoted */
+	CHECK(read_all("~/new", buf, sizeof(buf)) > 0);
+	CHECK(strcmp(buf, "# a  comment\nput led1 1\nwait 500\nput led1 0\n") == 0);
+	CHECK(system("ed ~/new 3c wait 250") == 0 && system("ed ~/new 1d") == 0);
+	CHECK(read_all("~/new", buf, sizeof(buf)) > 0);
+	CHECK(strcmp(buf, "put led1 1\nwait 250\nput led1 0\n") == 0);
+	CHECK(strstr(capture("ed ~/new"), "  2  wait 250\n") != NULL);
+	CHECK(system("ed ~/new 9c x") == -1 && system("ed ~/new 0d") == -1);
+	CHECK(system("ed ~/new 2x y") == -1 && system("ed ~/new 1d extra") == -1);
+	CHECK(system("ed ~/nothing") == -1 && system("ed ttyS1 1d") == -1);
+	CHECK(system("echo last > ~/nonl") == 0 && system("ed ~/nonl 1a after") == 0);
+	CHECK(read_all("~/nonl", buf, sizeof(buf)) > 0 && strcmp(buf, "last\nafter\n") == 0);
+	CHECK(system("ed ~/new 3d") == 0 && system("ed ~/new 2d") == 0 && system("ed ~/new 1d") == 0);
+	CHECK(read_all("~/new", buf, sizeof(buf)) == 0 && system("ed ~/new 1d") == -1);
+
 	CHECK(system("cd") == 0 && vfs_dir_path(vfs_cwd(), buf, sizeof(buf)) == 0);
 	CHECK(strcmp(buf, "/home") == 0);
 	CHECK(system("std -t term") == 0);

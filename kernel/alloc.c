@@ -54,10 +54,8 @@ void *__attribute__((__section__(".libc.malloc"))) malloc(size_t size)
 		return NULL;
 	}
 
-	/* 2-byte alignment: odd addresses cause address error traps on 16-bit cores */
-	if (size % 2 != 0) {
-		size++;
-	}
+	/* 2-byte alignment on 16-bit cores (odd addresses trap), 8 on a PC (ALLOC_ALIGN) */
+	size = (size + ALLOC_ALIGN - 1u) & ~(size_t)(ALLOC_ALIGN - 1u);
 
 	/* a free entry in the block table */
 	int slot = -1;

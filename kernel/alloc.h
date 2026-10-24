@@ -15,7 +15,8 @@
  * @endcode
  *
  * Allocation is first fit over at most MAX_BLOCK_COUNT blocks; sizes are
- * rounded up to 2 bytes, because 16-bit cores trap on odd word addresses.
+ * rounded up to ALLOC_ALIGN (2 bytes on the MCU, where odd word addresses
+ * trap; 8 in a host build).
  */
 
 #ifndef ALLOC_H
@@ -26,11 +27,21 @@
 #include <stdlib.h>
 
 /**
+ * Block alignment: 2 bytes on a 16-bit core (odd addresses trap); on a PC
+ * (host build) 8, so blocks can hold pointers and 64-bit values.
+ */
+#if defined(__XC16__)
+#define ALLOC_ALIGN 2u
+#else
+#define ALLOC_ALIGN 8u
+#endif
+
+/**
  * @brief Defines the heap buffer. Use exactly once, in one C file.
  * @param SIZE Heap size in bytes.
  */
-#define ALLOC_INIT_HEAP(SIZE)       \
-	uint8_t alloc_heap[(SIZE)]; \
+#define ALLOC_INIT_HEAP(SIZE)                                              \
+	uint8_t alloc_heap[(SIZE)] __attribute__((aligned(ALLOC_ALIGN))); \
 	const size_t alloc_heap_length = (SIZE)
 
 extern uint8_t alloc_heap[];	       /**< The heap, from ALLOC_INIT_HEAP(). */

@@ -232,6 +232,19 @@ tfs_file_t *vfs_file_get(int handle);
  */
 void vfs_interpreter_set(int (*run)(void *args, int argc, char *argv[]));
 
+/**
+ * @brief The `ed` command (vfs/ed.c, optional): edits a file one line per command.
+ *
+ * @code
+ * fsi_register_app("ed", vfs_ed);
+ * @endcode
+ * ed FILE lists it numbered; ed FILE Nc TEXT changes line N, Na adds after
+ * it (0a: first), Ni inserts before it, Nd deletes it. The whole file is in
+ * RAM during the command only (up to ED_FILE_MAX, 1024 bytes) and is written
+ * back at once with O_TRUNC.
+ */
+int vfs_ed(void *args, int argc, char *argv[]);
+
 /** @brief Registers the vfs commands (call after shell_initialize()). @return 0. */
 int vfs_bin_initialize(void);
 

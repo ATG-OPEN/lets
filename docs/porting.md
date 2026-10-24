@@ -34,7 +34,7 @@ uint64_t system_time_get(void)
 ## Heap
 
 `ALLOC_INIT_HEAP(size);` once, in one C file. `malloc` / `free` come from `kernel/alloc.c`
-(64 blocks, 2-byte alignment). `alloc_map()` / `alloc_info()` print it; `top` shows each
+(64 blocks, 2-byte alignment; 8 in a host build). `alloc_map()` / `alloc_info()` print it; `top` shows each
 task's share.
 
 ## stdout and the shell

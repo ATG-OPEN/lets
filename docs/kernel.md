@@ -46,7 +46,7 @@ Tasks never block or busy-wait; keep each call short.
 
 ## Memory
 
-- `malloc` / `free` use a fixed heap with 64 blocks and 2-byte alignment.
+- `malloc` / `free` use a fixed heap with 64 blocks and 2-byte alignment (8 in a host build).
 - New blocks have no owner. `task_create` gives `args` to the new task, and
   `kill` or a negative return frees every block that task owns.
 - Allocate a task's state in its `*_execute` function and hand it over with
