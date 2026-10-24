@@ -27,33 +27,37 @@ static int bin_bad(void)
 	return -1;
 }
 
+/*
+ * One line of `ls -l`, as Linux shows the type and the permissions:
+ * d directory, - file (also a RAM file or a command), c device, b block
+ * device; r / w / x from what the file or node can do.
+ */
 static void bin_ls_long(const vfs_dirent_t *e)
 {
-	char kind = 'f';
-	char perm[5] = "rw--";
+	char mode[5] = "-rw-";
 
 	if (e->kind == VFS_DIR) {
-		kind = e->mount ? 'm' : 'd';
-		strcpy(perm, "----");
+		strcpy(mode, "drwx");
 	} else if (e->kind == VFS_NODE) {
-		fsi_handler_t *h = fsi_nodes_get()[e->node].handlers;
+		fsi_node_t *n = fsi_nodes_get() + e->node;
+		fsi_handler_t *h = n->handlers;
+		bool device = (h->read_handler || h->write_handler) && tmp_file_size(n) < 0;
 
-		kind = 'n';
-		perm[0] = h->read_handler ? 'r' : '-';
-		perm[1] = h->write_handler ? 'w' : '-';
-		perm[2] = h->execute_handler ? 'x' : '-';
-		perm[3] = h->lseek_handler ? 's' : '-';
+		mode[0] = e->block ? 'b' : device ? 'c' : '-';
+		mode[1] = h->read_handler ? 'r' : '-';
+		mode[2] = h->write_handler ? 'w' : '-';
+		mode[3] = h->execute_handler ? 'x' : '-';
 	}
 
-	printf("%c %s %8lu %s%s\n", kind, perm, (unsigned long)e->size, e->name,
-	       e->kind == VFS_DIR ? "/" : "");
+	printf("%s %6lu %s\n", mode, (unsigned long)e->size, e->name);
 }
 
-/* ls [-a] [-l] [path] */
+/* ls [-a] [-l] [-p | -F] [path] */
 static int bin_ls(void *args, int argc, char *argv[])
 {
 	bool all = false;
 	bool list = false;
+	bool slash = false; /* -p / -F: a '/' after a directory */
 	const char *path = ".";
 
 	for (int i = 1; i < argc; i++) {
@@ -67,6 +71,8 @@ static int bin_ls(void *args, int argc, char *argv[])
 				all = true;
 			} else if (*c == 'l') {
 				list = true;
+			} else if (*c == 'p' || *c == 'F') {
+				slash = true;
 			} else {
 				return bin_bad();
 			}
@@ -91,6 +97,7 @@ static int bin_ls(void *args, int argc, char *argv[])
 		strcpy(e.name, p.name);
 		e.kind = p.kind;
 		e.node = p.node;
+		e.block = (p.kind == VFS_NODE && vfs_blk_get(path) != NULL);
 
 		if (p.kind == VFS_FILE && tfs_stat(vfs_mount_get(p.dir), p.name, &t) == 0) {
 			e.size = t.size;
@@ -119,11 +126,12 @@ static int bin_ls(void *args, int argc, char *argv[])
 		if (list) {
 			bin_ls_long(&e);
 		} else {
-			printf("%s%s ", e.name, e.kind == VFS_DIR ? "/" : "");
+			printf("%s%s%s", count > 1 ? "  " : "", e.name,
+			       (slash && e.kind == VFS_DIR) ? "/" : "");
 		}
 	}
 
-	if (!list) {
+	if (!list && count > 0) {
 		printf("\n");
 	}
 
@@ -137,7 +145,8 @@ static int bin_cd(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	if (vfs_chdir(argc == 2 ? argv[1] : "/") < 0) {
+	/* no argument: home, as on Linux */
+	if (vfs_chdir(argc == 2 ? argv[1] : VFS_HOME) < 0 && (argc == 2 || vfs_chdir("/") < 0)) {
 		printf("not found\n");
 		return -1;
 	}
@@ -441,7 +450,7 @@ static int bin_df(void *args, int argc, char *argv[])
 	char path[VFS_PATH_MAX];
 	int count = 0;
 
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
+	for (int i = VFS_DIR_FIRST; i < VFS_DIR_FIRST + (int)VFS_DIRS_MAX; i++) {
 		tfs_t *fs = vfs_mount_get((uint8_t)i);
 
 		if (fs == NULL || vfs_dir_path((uint8_t)i, path, sizeof(path)) < 0) {
@@ -508,7 +517,7 @@ static int bin_mkfs(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
+	for (int i = VFS_DIR_FIRST; i < VFS_DIR_FIRST + (int)VFS_DIRS_MAX; i++) {
 		if (vfs_mount_get((uint8_t)i) != NULL && vfs_mount_get((uint8_t)i)->blk == blk) {
 			printf("mounted\n");
 			return -1;
@@ -584,9 +593,30 @@ static void bin_names(const char *word, bool command, bool (*candidate)(const ch
 	}
 }
 
+/* the prompt: the working directory, ~ for the home, as a Linux shell ("~$ ", "/tmp$ ") */
+static void bin_prompt(void)
+{
+	char path[VFS_PATH_MAX];
+	size_t home = strlen(VFS_HOME);
+	const char *shown = path;
+
+	if (vfs_dir_path(vfs_cwd(), path, sizeof(path)) < 0) {
+		strcpy(path, "?");
+	}
+
+	if (strncmp(path, VFS_HOME, home) == 0 && (path[home] == '\0' || path[home] == '/')) {
+		write(2, "~", 1);
+		shown = path + home;
+	}
+
+	write(2, (void *)shown, strlen(shown));
+	write(2, "$ ", 2);
+}
+
 int vfs_bin_initialize(void)
 {
 	shell_names_set(bin_names);
+	shell_prompt_set(bin_prompt);
 
 	vfs_app_set("ls", bin_ls);
 	vfs_app_set("cat", bin_cat);

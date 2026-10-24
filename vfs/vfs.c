@@ -2,15 +2,16 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * The tree over the fsi node table. Nothing is added to the table's entries;
- * a node's directory follows from its name and handlers:
+ * The tree over the fsi node table. The table holds only fsi nodes (devices,
+ * commands, RAM files), with nothing added to its entries; a node's directory
+ * follows from its name and handlers:
  *
  *   name[0] & 0x80    in directory (name[0] & 0x7F), its name starts at name[1]
  *   plain name        in /dev when it can be read or written, else in /bin
- *   name[0] == 0xFF   an open file (directory 0x7F, which never exists)
  *
- * Directories and mount points are nodes whose handlers are vfs_dir_handlers
- * or vfs_mnt_handlers (no handler set); a mount point's args is its tfs_t.
+ * Directories and mount points are not nodes: they are in vfs_dirs, with ids
+ * VFS_DIR_FIRST + k. Open files are not nodes either (vfs_files). So vfs takes
+ * no place in the node table.
  */
 
 #include "vfs.h"
@@ -22,14 +23,21 @@
 #include <string.h>
 
 #define VFS_PREFIX    0x80u /* name[0] of a node in a vfs directory: 0x80 | directory */
-#define VFS_FILE_MARK 0xFFu /* name[0] of an open file */
 #define VFS_DEPTH_MAX 8u    /* deepest directory vfs_dir_path() prints */
 #define VFS_VIRTUAL   2u    /* /bin and /dev, listed first in / */
 
 extern fsi_handler_t tmp_node; /* bin/tmp.c: a RAM file */
 
-static fsi_handler_t vfs_dir_handlers;
-static fsi_handler_t vfs_mnt_handlers;
+static fsi_handler_t vfs_blk_handlers; /* defined with the block devices */
+
+/* a directory, or a mount point when fs is set */
+typedef struct {
+	char name[VFS_DIR_NAME]; /* empty: a free entry */
+	uint8_t parent;		 /* directory id */
+	tfs_t *fs;		 /* the file system mounted here, or NULL */
+} vfs_dir_t;
+
+static vfs_dir_t vfs_dirs[VFS_DIRS_MAX];
 
 static uint8_t vfs_cwd_dir = VFS_ROOT;
 
@@ -71,20 +79,29 @@ static const char *vfs_name(const fsi_node_t *n)
 	return n->name + (vfs_prefixed(n) ? 1 : 0);
 }
 
-static bool vfs_is_dir(const fsi_node_t *n)
+/* the entry of directory id @dir, NULL for /, /bin, /dev or a free id */
+static vfs_dir_t *vfs_dir(uint8_t dir)
 {
-	return n->handlers == &vfs_dir_handlers || n->handlers == &vfs_mnt_handlers;
+	unsigned int k = (unsigned int)dir - VFS_DIR_FIRST;
+
+	if (dir < VFS_DIR_FIRST || k >= VFS_DIRS_MAX || vfs_dirs[k].name[0] == '\0') {
+		return NULL;
+	}
+
+	return &vfs_dirs[k];
 }
 
 /* a directory that exists */
 static bool vfs_dir_ok(uint8_t dir)
 {
-	return dir < 3u || (dir < FSI_MAX_NODES_COUNT && vfs_used(dir) && vfs_is_dir(vfs_at(dir)));
+	return dir < VFS_DIR_FIRST || vfs_dir(dir) != NULL;
 }
 
 static uint8_t vfs_dir_parent(uint8_t dir)
 {
-	return (dir < 3u) ? VFS_ROOT : vfs_parent(vfs_at(dir));
+	vfs_dir_t *d = vfs_dir(dir);
+
+	return (d == NULL) ? VFS_ROOT : d->parent;
 }
 
 /* where fsi_node_create() will put the next node */
@@ -118,6 +135,27 @@ static int vfs_child(uint8_t dir, const char *name)
 	return -1;
 }
 
+/* the directory named @name in @dir (/bin and /dev too), -1 if none */
+static int vfs_subdir(uint8_t dir, const char *name)
+{
+	if (dir == VFS_ROOT && strcmp(name, "bin") == 0) {
+		return VFS_BIN;
+	}
+
+	if (dir == VFS_ROOT && strcmp(name, "dev") == 0) {
+		return VFS_DEV;
+	}
+
+	for (unsigned int k = 0; k < VFS_DIRS_MAX; k++) {
+		if (vfs_dirs[k].name[0] != '\0' && vfs_dirs[k].parent == dir &&
+		    strcmp(vfs_dirs[k].name, name) == 0) {
+			return (int)(VFS_DIR_FIRST + k);
+		}
+	}
+
+	return -1;
+}
+
 static bool vfs_dir_empty(uint8_t dir)
 {
 	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++) {
@@ -126,17 +164,31 @@ static bool vfs_dir_empty(uint8_t dir)
 		}
 	}
 
+	for (unsigned int k = 0; k < VFS_DIRS_MAX; k++) {
+		if (vfs_dirs[k].name[0] != '\0' && vfs_dirs[k].parent == dir) {
+			return false;
+		}
+	}
+
 	return vfs_mount_get(dir) == NULL;
+}
+
+/* a name for @dir: not there yet, no '/', not too long for a node there */
+static bool vfs_name_free(uint8_t dir, const char *name, size_t max)
+{
+	size_t len = strlen(name);
+
+	return len > 0 && len <= max && strchr(name, '/') == NULL && (uint8_t)name[0] < VFS_PREFIX &&
+	       strcmp(name, ".") != 0 && strcmp(name, "..") != 0 && vfs_dir_ok(dir) &&
+	       vfs_mount_get(dir) == NULL && vfs_child(dir, name) < 0 && vfs_subdir(dir, name) < 0;
 }
 
 /* the name a node in @dir gets in the table */
 static int vfs_fullname(uint8_t dir, const char *name, char *full)
 {
-	size_t len = strlen(name);
 	bool plain = (dir == VFS_BIN || dir == VFS_DEV);
 
-	if (len == 0 || strchr(name, '/') != NULL || (uint8_t)name[0] >= VFS_PREFIX ||
-	    len > FSI_NODE_NAME_MAX_LENGTH - (plain ? 1u : 2u)) {
+	if (!vfs_name_free(dir, name, FSI_NODE_NAME_MAX_LENGTH - (plain ? 1u : 2u))) {
 		return -1;
 	}
 
@@ -156,8 +208,7 @@ static int vfs_node_add(uint8_t dir, const char *name, bool hidden, void *args,
 	char full[FSI_NODE_NAME_MAX_LENGTH];
 	int i = vfs_free_slot();
 
-	if (i < 0 || !vfs_dir_ok(dir) || vfs_mount_get(dir) != NULL || vfs_child(dir, name) >= 0 ||
-	    vfs_fullname(dir, name, full) < 0) {
+	if (i < 0 || vfs_fullname(dir, name, full) < 0) {
 		return -1;
 	}
 
@@ -166,6 +217,25 @@ static int vfs_node_add(uint8_t dir, const char *name, bool hidden, void *args,
 	}
 
 	return i;
+}
+
+/* a new directory: its id, or -1 */
+static int vfs_dir_add(uint8_t dir, const char *name)
+{
+	if (dir == VFS_BIN || dir == VFS_DEV || !vfs_name_free(dir, name, VFS_DIR_NAME - 1u)) {
+		return -1;
+	}
+
+	for (unsigned int k = 0; k < VFS_DIRS_MAX; k++) {
+		if (vfs_dirs[k].name[0] == '\0') {
+			strcpy(vfs_dirs[k].name, name);
+			vfs_dirs[k].parent = dir;
+			vfs_dirs[k].fs = NULL;
+			return (int)(VFS_DIR_FIRST + k);
+		}
+	}
+
+	return -1;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -180,7 +250,20 @@ int vfs_resolve(const char *path, vfs_path_t *p)
 	const char *s = path;
 	uint8_t dir = (*s == '/') ? VFS_ROOT : vfs_cwd_dir;
 
+	/* ~ is the home, as in a Linux shell */
+	if (s[0] == '~' && (s[1] == '\0' || s[1] == '/')) {
+		vfs_path_t home;
+
+		if (vfs_resolve(VFS_HOME, &home) < 0 || home.kind != VFS_DIR) {
+			return -1;
+		}
+
+		dir = home.dir;
+		s++;
+	}
+
 	p->name[0] = '\0';
+	p->node = -1;
 
 	for (;;) {
 		while (*s == '/') {
@@ -190,7 +273,6 @@ int vfs_resolve(const char *path, vfs_path_t *p)
 		if (*s == '\0') {
 			p->kind = VFS_DIR;
 			p->dir = dir;
-			p->node = (dir < 3u) ? -1 : dir;
 			return 0;
 		}
 
@@ -219,20 +301,10 @@ int vfs_resolve(const char *path, vfs_path_t *p)
 			continue;
 		}
 
-		if (dir == VFS_ROOT && strcmp(p->name, "bin") == 0) {
-			dir = VFS_BIN;
-			continue;
-		}
+		int d = vfs_subdir(dir, p->name);
 
-		if (dir == VFS_ROOT && strcmp(p->name, "dev") == 0) {
-			dir = VFS_DEV;
-			continue;
-		}
-
-		int c = vfs_child(dir, p->name);
-
-		if (c >= 0 && vfs_is_dir(vfs_at(c))) {
-			dir = (uint8_t)c;
+		if (d >= 0) {
+			dir = (uint8_t)d;
 			continue;
 		}
 
@@ -240,8 +312,9 @@ int vfs_resolve(const char *path, vfs_path_t *p)
 			return -1;
 		}
 
+		int c = vfs_child(dir, p->name);
+
 		p->dir = dir;
-		p->node = -1;
 		p->kind = VFS_NONE;
 
 		tfs_t *fs = vfs_mount_get(dir);
@@ -293,9 +366,7 @@ int vfs_dir_path(uint8_t dir, char *buffer, unsigned int size)
 
 	while (depth-- > 0) {
 		uint8_t d = chain[depth];
-		const char *name = (d == VFS_BIN)   ? "bin"
-				   : (d == VFS_DEV) ? "dev"
-						    : vfs_name(vfs_at(d));
+		const char *name = (d == VFS_BIN) ? "bin" : (d == VFS_DEV) ? "dev" : vfs_dir(d)->name;
 
 		if (strlen(buffer) + strlen(name) + 2u > size) {
 			return -1;
@@ -331,6 +402,9 @@ int vfs_chdir(const char *path)
 
 int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 {
+	const uint16_t nodes = VFS_VIRTUAL + VFS_DIRS_MAX; /* where the nodes start */
+	const uint16_t files = nodes + FSI_MAX_NODES_COUNT;
+
 	if (index == NULL || e == NULL || !vfs_dir_ok(dir)) {
 		return -1;
 	}
@@ -338,8 +412,8 @@ int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 	memset(e, 0, sizeof(*e));
 	e->node = -1;
 
-	/* /bin and /dev, then the table, then the files of a mounted file system */
-	while (*index < VFS_VIRTUAL + FSI_MAX_NODES_COUNT) {
+	/* /bin and /dev, the directories, the nodes, the files of a file system */
+	while (*index < files) {
 		uint16_t i = (*index)++;
 
 		if (i < VFS_VIRTUAL) {
@@ -352,7 +426,20 @@ int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 			return 0;
 		}
 
-		int k = i - VFS_VIRTUAL;
+		if (i < nodes) {
+			vfs_dir_t *d = &vfs_dirs[i - VFS_VIRTUAL];
+
+			if (d->name[0] == '\0' || d->parent != dir) {
+				continue;
+			}
+
+			strcpy(e->name, d->name);
+			e->kind = VFS_DIR;
+			e->mount = (d->fs != NULL);
+			return 0;
+		}
+
+		int k = i - nodes;
 		fsi_node_t *n = vfs_at(k);
 
 		if (!vfs_used(k) || vfs_parent(n) != dir) {
@@ -360,8 +447,8 @@ int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 		}
 
 		strcpy(e->name, vfs_name(n));
-		e->kind = vfs_is_dir(n) ? VFS_DIR : VFS_NODE;
-		e->mount = (n->handlers == &vfs_mnt_handlers);
+		e->kind = VFS_NODE;
+		e->block = (n->handlers == &vfs_blk_handlers);
 		e->hidden = n->hidden;
 		e->node = (int16_t)k;
 
@@ -374,14 +461,14 @@ int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 	}
 
 	tfs_t *fs = vfs_mount_get(dir);
-	uint8_t t = (uint8_t)(*index - VFS_VIRTUAL - FSI_MAX_NODES_COUNT);
+	uint8_t t = (uint8_t)(*index - files);
 	tfs_info_t info;
 
 	if (fs == NULL || tfs_dir(fs, &t, &info) < 0) {
 		return -1;
 	}
 
-	*index = (uint16_t)(VFS_VIRTUAL + FSI_MAX_NODES_COUNT + t);
+	*index = (uint16_t)(files + t);
 
 	strcpy(e->name, info.name);
 	e->kind = VFS_FILE;
@@ -458,12 +545,11 @@ int vfs_mkdir(const char *path)
 {
 	vfs_path_t p;
 
-	if (vfs_resolve(path, &p) < 0 || p.kind != VFS_NONE || p.dir == VFS_BIN ||
-	    p.dir == VFS_DEV) {
+	if (vfs_resolve(path, &p) < 0 || p.kind != VFS_NONE) {
 		return -1;
 	}
 
-	return vfs_node_add(p.dir, p.name, false, NULL, &vfs_dir_handlers) < 0 ? -1 : 0;
+	return vfs_dir_add(p.dir, p.name) < 0 ? -1 : 0;
 }
 
 int vfs_remove(const char *path)
@@ -484,13 +570,14 @@ int vfs_remove(const char *path)
 		return 0;
 	}
 
-	if (p.kind == VFS_DIR && p.dir >= 3u && vfs_at(p.dir)->handlers == &vfs_dir_handlers &&
-	    vfs_dir_empty(p.dir)) {
+	vfs_dir_t *d = (p.kind == VFS_DIR) ? vfs_dir(p.dir) : NULL;
+
+	if (d != NULL && vfs_dir_empty(p.dir)) {
 		if (vfs_cwd_dir == p.dir) {
-			vfs_cwd_dir = vfs_dir_parent(p.dir);
+			vfs_cwd_dir = d->parent;
 		}
 
-		vfs_drop(p.dir);
+		d->name[0] = '\0';
 		return 0;
 	}
 
@@ -517,22 +604,37 @@ int vfs_rename(const char *from, const char *to)
 		return tfs_rename(vfs_mount_get(dir), a.name, name);
 	}
 
-	int i = (a.kind == VFS_NODE) ? a.node : (a.kind == VFS_DIR && a.dir >= 3u) ? a.dir : -1;
-	char full[FSI_NODE_NAME_MAX_LENGTH];
+	if (b.kind != VFS_DIR && b.kind != VFS_NONE) {
+		return -1;
+	}
 
-	if (i < 0 || (b.kind != VFS_DIR && b.kind != VFS_NONE) || vfs_mount_get(dir) != NULL ||
-	    vfs_child(dir, name) >= 0 || vfs_fullname(dir, name, full) < 0) {
+	if (a.kind == VFS_NODE) {
+		char full[FSI_NODE_NAME_MAX_LENGTH];
+
+		if (vfs_fullname(dir, name, full) < 0) {
+			return -1;
+		}
+
+		strcpy(vfs_at(a.node)->name, full);
+		return 0;
+	}
+
+	vfs_dir_t *d = (a.kind == VFS_DIR) ? vfs_dir(a.dir) : NULL;
+
+	if (d == NULL || dir == VFS_BIN || dir == VFS_DEV ||
+	    !vfs_name_free(dir, name, VFS_DIR_NAME - 1u)) {
 		return -1;
 	}
 
 	/* not into itself */
-	for (uint8_t d = dir; d != VFS_ROOT; d = vfs_dir_parent(d)) {
-		if (d == i) {
+	for (uint8_t up = dir; up != VFS_ROOT; up = vfs_dir_parent(up)) {
+		if (up == a.dir) {
 			return -1;
 		}
 	}
 
-	strcpy(vfs_at(i)->name, full);
+	strcpy(d->name, name);
+	d->parent = dir;
 
 	return 0;
 }
@@ -543,8 +645,8 @@ int vfs_tmp_create(const vfs_path_t *p)
 	char *argv[2] = {"touch", full};
 	int i = vfs_free_slot();
 
-	if (p == NULL || p->kind != VFS_NONE || p->dir == VFS_BIN || !vfs_dir_ok(p->dir) ||
-	    vfs_mount_get(p->dir) != NULL || vfs_fullname(p->dir, p->name, full) < 0) {
+	if (p == NULL || p->kind != VFS_NONE || p->dir == VFS_BIN ||
+	    vfs_fullname(p->dir, p->name, full) < 0) {
 		return -1;
 	}
 
@@ -638,24 +740,18 @@ vfs_blk_t *vfs_blk_get(const char *path)
 }
 
 /* -------------------------------------------------------------------------- */
-/* open files */
+/* open files: handles after the node table, so they never take a node */
 
-static int vfs_file_read(void *args, void *buffer, unsigned int length)
+static tfs_file_t *vfs_files[VFS_FILES_MAX];
+
+tfs_file_t *vfs_file_get(int handle)
 {
-	return tfs_read(args, buffer, length);
+	int k = handle - FSI_MAX_NODES_COUNT;
+
+	return (k >= 0 && k < (int)VFS_FILES_MAX) ? vfs_files[k] : NULL;
 }
 
-static int vfs_file_write(void *args, void *buffer, unsigned int length)
-{
-	return tfs_write(args, buffer, length);
-}
-
-static int vfs_file_lseek(int handle, off_t offset, int whence)
-{
-	return (int)tfs_seek(vfs_file_get(handle), (int32_t)offset, whence);
-}
-
-static int vfs_file_close(int handle)
+int vfs_file_close(int handle)
 {
 	tfs_file_t *f = vfs_file_get(handle);
 
@@ -666,34 +762,21 @@ static int vfs_file_close(int handle)
 	int r = tfs_close(f);
 
 	free(f);
-	vfs_drop(handle);
+	vfs_files[handle - FSI_MAX_NODES_COUNT] = NULL;
 
 	return r;
 }
 
-static fsi_handler_t vfs_file_handlers = {
-	.read_handler = vfs_file_read,
-	.write_handler = vfs_file_write,
-	.lseek_handler = vfs_file_lseek,
-	.close_handler = vfs_file_close,
-};
-
-tfs_file_t *vfs_file_get(int handle)
-{
-	if (handle < 0 || handle >= FSI_MAX_NODES_COUNT || !vfs_used(handle) ||
-	    vfs_at(handle)->handlers != &vfs_file_handlers) {
-		return NULL;
-	}
-
-	return vfs_at(handle)->args;
-}
-
 int vfs_file_open(const vfs_path_t *p, int flags)
 {
-	static const char mark[2] = {(char)VFS_FILE_MARK, '\0'};
 	tfs_t *fs = (p == NULL) ? NULL : vfs_mount_get(p->dir);
+	int k = 0;
 
-	if (fs == NULL) {
+	while (k < (int)VFS_FILES_MAX && vfs_files[k] != NULL) {
+		k++;
+	}
+
+	if (fs == NULL || k == (int)VFS_FILES_MAX) {
 		return -1;
 	}
 
@@ -717,20 +800,15 @@ int vfs_file_open(const vfs_path_t *p, int flags)
 	}
 
 	tfs_file_t *f = malloc(sizeof(tfs_file_t));
-	int i = vfs_free_slot();
 
-	if (f == NULL || i < 0 || tfs_open(fs, f, p->name, mode) < 0) {
+	if (f == NULL || tfs_open(fs, f, p->name, mode) < 0) {
 		free(f);
 		return -1;
 	}
 
-	if (fsi_node_create(mark, true, f, &vfs_file_handlers) < 0) {
-		tfs_close(f);
-		free(f);
-		return -1;
-	}
+	vfs_files[k] = f;
 
-	return i;
+	return FSI_MAX_NODES_COUNT + k;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -738,12 +816,9 @@ int vfs_file_open(const vfs_path_t *p, int flags)
 
 tfs_t *vfs_mount_get(uint8_t dir)
 {
-	if (dir < 3u || dir >= FSI_MAX_NODES_COUNT || !vfs_used(dir) ||
-	    vfs_at(dir)->handlers != &vfs_mnt_handlers) {
-		return NULL;
-	}
+	vfs_dir_t *d = vfs_dir(dir);
 
-	return vfs_at(dir)->args;
+	return (d == NULL) ? NULL : d->fs;
 }
 
 int vfs_mount(const char *dev, const char *path, bool format)
@@ -757,21 +832,21 @@ int vfs_mount(const char *dev, const char *path, bool format)
 	}
 
 	/* a device is mounted once */
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
-		if (vfs_mount_get((uint8_t)i) != NULL && vfs_mount_get((uint8_t)i)->blk == blk) {
+	for (unsigned int k = 0; k < VFS_DIRS_MAX; k++) {
+		if (vfs_dirs[k].name[0] != '\0' && vfs_dirs[k].fs != NULL && vfs_dirs[k].fs->blk == blk) {
 			return -1;
 		}
 	}
 
-	if (p.kind == VFS_DIR && p.dir >= 3u && vfs_at(p.dir)->handlers == &vfs_dir_handlers &&
-	    vfs_dir_empty(p.dir)) {
+	/* an empty directory, or a new one */
+	if (p.kind == VFS_DIR && vfs_dir(p.dir) != NULL && vfs_dir_empty(p.dir)) {
 		d = p.dir;
 	}
 
 	bool created = false;
 
-	if (p.kind == VFS_NONE && p.dir != VFS_BIN && p.dir != VFS_DEV) {
-		d = vfs_node_add(p.dir, p.name, false, NULL, &vfs_dir_handlers);
+	if (p.kind == VFS_NONE) {
+		d = vfs_dir_add(p.dir, p.name);
 		created = true;
 	}
 
@@ -780,26 +855,23 @@ int vfs_mount(const char *dev, const char *path, bool format)
 	}
 
 	tfs_t *fs = malloc(sizeof(tfs_t));
-
 	bool ok = (fs != NULL && tfs_mount(fs, blk) == 0);
 
 	if (!ok && fs != NULL && format) {
-		ok = tfs_format(blk, 0, 0) == 0 &&
-		     tfs_mount(fs, blk) == 0;
+		ok = tfs_format(blk, 0, 0) == 0 && tfs_mount(fs, blk) == 0;
 	}
 
 	if (!ok) {
 		free(fs);
 
 		if (created) {
-			vfs_drop(d);
+			vfs_dir((uint8_t)d)->name[0] = '\0';
 		}
 
 		return -1;
 	}
 
-	vfs_at(d)->args = fs;
-	vfs_at(d)->handlers = &vfs_mnt_handlers;
+	vfs_dir((uint8_t)d)->fs = fs;
 
 	return 0;
 }
@@ -818,15 +890,14 @@ int vfs_umount(const char *path)
 		return -1;
 	}
 
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
+	for (int i = FSI_MAX_NODES_COUNT; i < FSI_MAX_NODES_COUNT + (int)VFS_FILES_MAX; i++) {
 		if (vfs_file_get(i) != NULL && vfs_file_get(i)->fs == fs) {
 			return -1; /* a file is open */
 		}
 	}
 
 	free(fs);
-	vfs_at(p.dir)->args = NULL;
-	vfs_at(p.dir)->handlers = &vfs_dir_handlers;
+	vfs_dir(p.dir)->fs = NULL;
 
 	return 0;
 }
@@ -836,6 +907,7 @@ int vfs_umount(const char *path)
 int vfs_initialize(void)
 {
 	vfs_cwd_dir = VFS_ROOT;
+	memset(vfs_dirs, 0, sizeof(vfs_dirs));
 
 	if (vfs_mkdir("/app") < 0 || vfs_mkdir("/tmp") < 0 || vfs_mkdir("/mnt") < 0) {
 		return -1;

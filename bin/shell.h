@@ -12,7 +12,9 @@
  *
  * The shell is a task that reads command lines from stdin and runs each with
  * system(). Commands: cat, echo, kill, ls, mv, top, touch, rm (plus std and
- * reboot, built into the kernel).
+ * reboot, built into the kernel). cat, echo, ls and mv are optional: a
+ * project that leaves bin/cat.c, echo.c, ls.c or mv.c out of its build (vfs
+ * has its own) simply does not get them.
  *
  * After `std <node>` one read() is one command line, with no echo: the mode
  * for a program on the other end. After `std -t <node>` it is a terminal for
@@ -26,6 +28,15 @@
  * @return 0.
  */
 int shell_initialize(void *args);
+
+/**
+ * @brief Replaces the prompt of the terminal mode (default "> ").
+ *
+ * @p prompt prints it with write(2, ...); vfs_bin_initialize() installs one
+ * that shows the working directory, as a Linux shell does ("/tmp$ ").
+ * NULL: the default.
+ */
+void shell_prompt_set(void (*prompt)(void));
 
 /**
  * @brief Lists the names Tab may complete a word with.

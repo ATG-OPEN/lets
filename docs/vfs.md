@@ -10,8 +10,14 @@ fsi keeps working: drivers, apps, startup scripts, argscripts, `std ttyS1`, `ech
 ├── dev/    devices: every plain fsi node that can be read or written (ttyS1, led1, ain1, lcd, ee0, ...)
 ├── app/    project applications (vfs_register_app("/app/trgmon", ...))
 ├── tmp/    RAM files (touch), or a file system on SPI SRAM / a RAM disk mounted over it
-└── mnt/    mounted file systems: /mnt/ee on the SPI EEPROM (configs, scripts, firmware images)
+├── mnt/    mounted file systems: /mnt/ee on the SPI EEPROM (configs, scripts, firmware images)
+├── boot/   (a mount) the startup script, rc
+└── home/   (a mount) the user's scripts, run by name: `blink` runs /home/blink
 ```
+
+The shell looks and works like a Linux one: the prompt is the working directory (`/dev$ `, `~$ `
+in the home), `ls` lists plain names (`ls -p` marks the directories, `ls -l` shows the type and
+`rwx` as Linux does), `cd` alone goes home and `~` is the home in any path.
 
 ## fsi or vfs
 
@@ -22,7 +28,7 @@ A project links one of the two:
 | sources | `fsi/fsi.c`, `kernel/posix.c` | `fsi/fsi.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tfs.c`, `vfs/bin.c`, drivers from `vfs/dev/` as needed |
 | names | flat: `ttyS1`, `ls` | the same bare names, plus paths: `/dev/ttyS1`, `/mnt/ee/config` |
 | files | `touch`: 126-byte RAM files | RAM files as well, plus files of any size on a mounted file system |
-| commands | `cat echo kill ls mv rm top touch std reboot` | the same; `ls cat echo rm mv touch` take paths; plus `cd pwd mkdir cp crc mount umount mkfs df` |
+| commands | `cat echo kill ls mv rm top touch std reboot` | the same; `ls cat echo rm mv touch` take paths; plus `cd pwd mkdir cp crc mount umount mkfs df`; scripts by name |
 
 Compatibility, both ways:
 
@@ -32,9 +38,15 @@ Compatibility, both ways:
 - A bare name that isn't in the working directory is looked up among all plain nodes, the same
   way fsi does it. `open("ttyS1", 0, 0)` works from any directory.
 - Code that walks `fsi_nodes_get()` still sees every node. A node in a vfs directory such as
-  `/app` or `/tmp` has the directory in the first byte of its name (`0x80 | index`), so its name
+  `/app` or `/tmp` has the directory in the first byte of its name (`0x80 | id`), so its name
   can be up to 14 characters instead of 15.
-- An open file is a hidden node, and it goes away on `close()`. Its name starts with `0xFF`.
+- vfs itself takes no place in the node table (40 entries, fixed by `fsi.h`): directories and
+  mount points are in a table of its own (`VFS_DIRS_MAX` = 8, names up to 11 characters, 16
+  bytes each), and an open file's handle comes after the node table (40 to 43 for
+  `VFS_FILES_MAX` = 4 files open at once).
+- In a vfs project the kernel's `ls`, `cat`, `echo` and `mv` (`bin/ls.c` ...) can be left out of
+  the build, since vfs has its own: `shell_initialize()` references them weakly. That saves
+  about 1.6 KB of flash at -O1.
 
 ## Boot
 
@@ -79,8 +91,8 @@ The SPI bus is two functions from the board, `select(bool)` and `exchange(byte)`
 ## Shell
 
 ```text
-ls [-a] [-l] [path]     -l: kind (d dir, m mount, f file, n node) / rwxs / size / name
-cd [path]   pwd   mkdir path
+ls [-a] [-l] [-p] [path]  -l: type (d directory, - file, c device, b block device), rwx, size
+cd [path]   pwd   mkdir path     cd alone: home (VFS_HOME, /home)
 cat [-x] path           a file to its end; a node with one read, as before
 echo text > path        replace (atomic on a file system); >> appends
 cp from to              any node or file to any file; `to` may be a directory
@@ -92,7 +104,19 @@ mount [-f] dev path     -f formats a device without a file system; no arguments:
 umount path             refused while a file is open on it
 mkfs dev [block] [n]    block size and most files; by default chosen by the device size
 df                      every mount: size, free bytes
+blink                   a script in /home runs by its name, as a task of that name
+/tmp/t   ./x            any other script by its path (a file or a RAM file)
 ```
+
+Scripts are run by the interpreter the project sets, usually argscript:
+
+```c
+fsi_register_app("as", argscript_execute);
+vfs_interpreter_set(argscript_execute);     // blink: /home/blink as the task "blink"
+```
+
+`top` shows a running script under its name and `kill blink` stops it. Words after the name are
+not passed to the script.
 
 ## In C
 
@@ -151,6 +175,47 @@ data              blocks
 Format parameters are chosen by `mkfs`. The layout is little-endian and byte-by-byte, so an
 image built on a PC matches one built on the MCU.
 
+## In the MCU's own flash: flash24
+
+A board without an EEPROM keeps `/boot` and `/home` in two erase pages of its program flash
+(PIC24FJ GA7 / GB4 / GL / GU: 1024-instruction pages, double-word programming, ECC). Each
+instruction holds 16 bits of data, so the two pages give one 2044-byte device; `part` splits it:
+
+```c
+#define NV_ADDRESS 0x14800ul    /* two pages below the configuration page */
+
+static const uint16_t nv_space[2 * 1024] __attribute__((space(prog), address(NV_ADDRESS), noload));
+static const uint16_t nv_top[0x380] __attribute__((space(prog), address(0x15800), noload));
+
+static flash24_t nv;
+static part_t boot, home;
+
+flash24_init(&nv, NV_ADDRESS);
+part_init(&boot, &nv.blk, 0, 512);
+part_init(&home, &nv.blk, 512, nv.blk.size - 512);
+vfs_blk_register("nv0", &boot.blk);
+vfs_blk_register("nv1", &home.blk);
+vfs_mount("nv0", "/boot", true);
+vfs_mount("nv1", "/home", true);
+```
+
+- The second array keeps the linker from putting code above the two pages: code on both sides
+  of them would be out of reach of the short `rcall` branches ("PC Relative branch ... out of
+  range").
+- The pages take turns. A write that only fills erased double words is programmed in place.
+  Any other write copies the page, changed, to the other page and programs that page's header
+  last, so a power loss leaves the old page, and every write is all or nothing.
+- A double word is programmed once between erases, as ECC requires.
+- A copy erases one page and programs up to 511 double words, and the CPU stalls meanwhile
+  (tens of ms). Saving a small file costs 10 to 15 copies, so about 1500 saves fit in the
+  pages' 10 000 erase cycles. That is enough for configs and scripts, but not for logging.
+- `noload` keeps the pages out of the hex. Program with `ipecmd ... -OP14800-157FF` (in MPLAB X:
+  "Preserve Program Memory", range 14800-157ff) so that a firmware update keeps the files.
+
+`home/DEMO.X` (PIC24FJ128GL306) boots this way. `apps/nvfs.c` installs `/boot/rc` and four
+demo scripts in `/home` (blink, rgb, knob, buttons) on a new board, and leaves existing ones as
+they are.
+
 ## Firmware images
 
 Store the new program-memory image as a file, for example `/mnt/ee/fw.bin`, written with `O_TRUNC`
@@ -174,14 +239,15 @@ The transport that fills the file is not part of vfs. Any link that can `write()
 do it, for example `cp` from a port, or a protocol task that writes chunks with `O_TRUNC` and
 closes at the end.
 
-## Size (XC16 2.10, -O1, PIC24FJ64GU205)
+## Size (XC16 2.10, -O1, PIC24FJ128GL306)
 
 | file | flash | RAM |
 |------|-------|-----|
-| `vfs/tfs.c` | 5.2 KB (3.9 KB with `TFS_READONLY`) | - |
-| `vfs/vfs.c` | 4.6 KB | 50 B |
-| `vfs/posix.c` | 1.2 KB (`kernel/posix.c`: 0.9 KB) | 258 B (the same as kernel/posix.c) |
-| `vfs/bin.c` (15 commands) | 3.6 KB | - |
+| `vfs/tfs.c` | 5.3 KB (3.9 KB with `TFS_READONLY`) | - |
+| `vfs/vfs.c` | 4.9 KB | 150 B (8 directories, 4 open files) |
+| `vfs/posix.c` | 1.5 KB (`kernel/posix.c`: 0.9 KB) | 260 B (the same as kernel/posix.c) |
+| `vfs/bin.c` (15 commands, prompt, Tab) | 4.3 KB, minus 1.6 KB for the kernel commands left out | - |
+| `vfs/dev/flash24.c` / `part.c` | 1.5 / 0.2 KB | - |
 | `vfs/dev/ee25.c` / `sram23.c` / `ramdisk.c` | 0.7 / 0.45 / 0.2 KB | - |
 
 Leave out `bin.c` if a project only needs files from C. Build with `-DTFS_NO_CHECK` to drop the
@@ -193,5 +259,7 @@ repair at mount.
 emulated 25LC1024 answers byte by byte the way the real one does: it needs WREN, wraps writes
 inside a page and reports WIP. The emulated 23LC1024 is tested the same way. The test also cuts
 power during a replace, an append and a commit, and checks the whole tree through `system()` and
-`open` / `read` / `write` / `lseek`. `make` also builds `build/lets-vfs-demo`, a shell on your
+`open` / `read` / `write` / `lseek`. flash24 runs against two emulated flash pages that count
+any double word programmed twice (ECC), and the power is cut at every single erase and program
+of a file replacement, checking that the old file or the new one is there each time. `make` also builds `build/lets-vfs-demo`, a shell on your
 terminal with `/tmp` and `/mnt/ee` on RAM disks.

@@ -10,6 +10,7 @@
  */
 
 #include "vfs.h"
+#include "../bin/tmp.h"
 #include "../lib/args.h"
 
 #include <unistd.h>
@@ -110,6 +111,10 @@ int __attribute__((__section__(".libc.open"))) open(const char *pathname, int fl
 
 int __attribute__((__section__(".libc.close"))) close(int handle)
 {
+	if (vfs_file_get(handle) != NULL) {
+		return vfs_file_close(handle);
+	}
+
 	fsi_node_t *n = posix_node(handle);
 
 	if (n == NULL) {
@@ -125,6 +130,12 @@ int __attribute__((__section__(".libc.close"))) close(int handle)
 
 int __attribute__((__section__(".libc.write"))) write(int handle, void *buffer, unsigned int len)
 {
+	tfs_file_t *f = vfs_file_get(handle);
+
+	if (f != NULL) {
+		return tfs_write(f, buffer, len);
+	}
+
 	fsi_node_t *n = posix_node(handle);
 
 	if (n == NULL || buffer == NULL || n->handlers->write_handler == NULL) {
@@ -140,6 +151,12 @@ int __attribute__((__section__(".libc.write"))) write(int handle, void *buffer, 
 
 int __attribute__((__section__(".libc.read"))) read(int handle, void *buffer, unsigned int len)
 {
+	tfs_file_t *f = vfs_file_get(handle);
+
+	if (f != NULL) {
+		return tfs_read(f, buffer, len);
+	}
+
 	fsi_node_t *n = posix_node(handle);
 
 	if (n == NULL || buffer == NULL || n->handlers->read_handler == NULL) {
@@ -216,9 +233,43 @@ static fsi_node_t *posix_command(const char *name, bool *found)
 	return NULL;
 }
 
+static int (*posix_interpreter)(void *args, int argc, char *argv[]);
+
+void vfs_interpreter_set(int (*run)(void *args, int argc, char *argv[]))
+{
+	posix_interpreter = run;
+}
+
+/* the script @name runs: a file or RAM file at a path, or a file in VFS_HOME */
+static bool posix_script(const char *name, char *path)
+{
+	vfs_path_t p;
+
+	if (strchr(name, '/') == NULL) {
+		if (strlen(VFS_HOME) + strlen(name) + 2u > VFS_PATH_MAX) {
+			return false;
+		}
+
+		strcpy(path, VFS_HOME "/");
+		strcat(path, name);
+	} else {
+		strncpy(path, name, VFS_PATH_MAX - 1);
+		path[VFS_PATH_MAX - 1] = '\0';
+	}
+
+	if (vfs_resolve(path, &p) < 0) {
+		return false;
+	}
+
+	return p.kind == VFS_FILE ||
+	       (p.kind == VFS_NODE && tmp_file_size(fsi_nodes_get() + p.node) >= 0);
+}
+
 /*
  * Runs a command line: the first word names a command (`ls`, `/app/trgmon`),
- * whose handler gets the words as argc / argv. `reboot` is built in. Returns
+ * whose handler gets the words as argc / argv. A script (a file at a path,
+ * or by its name in VFS_HOME) goes to the interpreter set with
+ * vfs_interpreter_set(), as a task of its name. `reboot` is built in. Returns
  * the command's result, or -1 when there is no such command.
  */
 int __attribute__((__section__(".libc.system"))) system(const char *input)
@@ -250,6 +301,13 @@ int __attribute__((__section__(".libc.system"))) system(const char *input)
 
 	bool found;
 	fsi_node_t *e = posix_command(argv[0], &found);
+	char path[VFS_PATH_MAX];
+
+	if (e == NULL && posix_interpreter != NULL && posix_script(argv[0], path)) {
+		char *run[3] = {"exec", path, strrchr(path, '/') + 1};
+
+		return posix_interpreter(NULL, 3, run);
+	}
 
 	if (e == NULL) {
 		printf(found ? "not executive\n" : "not found\n");

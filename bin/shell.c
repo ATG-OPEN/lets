@@ -20,11 +20,7 @@
 
 #include "../kernel/task.h"
 
-#include "cat.h"
-#include "echo.h"
 #include "kill.h"
-#include "ls.h"
-#include "mv.h"
 #include "shell.h"
 #include "sscript.h"
 #include "tmp.h"
@@ -72,16 +68,29 @@ static void shell_print(const char *text)
 	write(2, (void *)text, strlen(text));
 }
 
-static void shell_prompt(void)
+static void shell_prompt_default(void)
 {
 	shell_print(SHELL_PROMPT);
+}
+
+static void (*shell_prompt_print)(void) = shell_prompt_default;
+
+void shell_prompt_set(void (*prompt)(void))
+{
+	shell_prompt_print = (prompt != NULL) ? prompt : shell_prompt_default;
+}
+
+static void shell_prompt(void)
+{
+	shell_prompt_print();
 	shell.prompted = true;
 }
 
 /* replaces what is shown after the prompt with the line in shell_buffer */
 static void shell_redraw(unsigned int shown)
 {
-	shell_print("\r" SHELL_PROMPT);
+	shell_print("\r");
+	shell_prompt_print();
 	write(2, shell_buffer, shell.length);
 
 	/* blank out what is left of a longer line, then step back */
@@ -432,13 +441,34 @@ int shell_loop(void *args, uint64_t system_time)
 	return 10;
 }
 
+/*
+ * ls, cat, echo and mv are weak: a project that replaces them (vfs) can leave
+ * their files out of the build, and they are then not registered here.
+ */
+extern int cat(void *args, int argc, char *argv[]) __attribute__((weak));
+extern int echo(void *args, int argc, char *argv[]) __attribute__((weak));
+extern int ls(void *args, int argc, char *argv[]) __attribute__((weak));
+extern int mv(void *args, int argc, char *argv[]) __attribute__((weak));
+
 int shell_initialize(void *args)
 {
-	fsi_register_app("cat", cat);
-	fsi_register_app("echo", echo);
+	if (cat != NULL) {
+		fsi_register_app("cat", cat);
+	}
+
+	if (echo != NULL) {
+		fsi_register_app("echo", echo);
+	}
+
+	if (ls != NULL) {
+		fsi_register_app("ls", ls);
+	}
+
+	if (mv != NULL) {
+		fsi_register_app("mv", mv);
+	}
+
 	fsi_register_app("kill", kill);
-	fsi_register_app("ls", ls);
-	fsi_register_app("mv", mv);
 	fsi_register_app("top", top);
 	fsi_register_app("touch", tmp_file_create);
 	fsi_register_app("rm", tmp_file_delete);

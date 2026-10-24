@@ -5,7 +5,7 @@
  * Host test for argscript, runs on the PC with fake nodes and a fake task loop.
  *
  *   cc -std=c99 -Wall -Wextra -include fcntl.h -Dopen=t_open -Dread=t_read \
- *      -Dwrite=t_write -Dclose=t_close -Dsystem=t_system \
+ *      -Dwrite=t_write -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek \
  *      as_test.c ../argscript.c -o as_test && ./as_test
  */
 
@@ -104,7 +104,28 @@ int t_open(const char *path, int flags, ...)
 		return 6;
 	if (strcmp(path, "script") == 0)
 		return 7;
+	if (strcmp(path, "long") == 0)
+		return 8;
 	return -1;
+}
+
+/* a file longer than one 127-byte read: it has a size */
+static const char long_script[] =
+	"# a script longer than 127 bytes, read whole because the file has a size\n"
+	"set n 0\n"
+	"repeat 4\n"
+	"    set n $n + 1\n"
+	"end\n"
+	"echo long $n\n";
+static long long_pos;
+
+off_t t_lseek(int fd, off_t offset, int whence)
+{
+	if (fd != 8)
+		return -1; /* a node without a size */
+	long size = (long)strlen(long_script);
+	long_pos = (whence == SEEK_END) ? size + offset : (whence == SEEK_SET) ? offset : long_pos + offset;
+	return long_pos;
 }
 
 int t_close(int fd)
@@ -126,6 +147,8 @@ ssize_t t_read(int fd, void *buf, size_t len)
 		src = file_a;
 	if (fd == 7)
 		src = "set n 3\nwhile $n > 0\necho file $n\nset n $n - 1\nend\n";
+	if (fd == 8)
+		src = long_script + long_pos;
 
 	if (src == NULL) {
 		return -1;
@@ -285,6 +308,7 @@ int main(void)
 	check("self kill", "echo a\nkill t\necho b", 5, "[echo a]");
 
 	check("as from node", "as script", 5, "[echo file 3][echo file 2][echo file 1]");
+	check("as long file", "as long", 20, "[echo long 4]");
 
 	check("busy loop yields", "while 1\nend", 3, "");
 

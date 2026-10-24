@@ -15,6 +15,8 @@
 #include "../vfs/dev/ramdisk.h"
 #include "../vfs/dev/ee25.h"
 #include "../vfs/dev/sram23.h"
+#include "../vfs/dev/flash24.h"
+#include "../vfs/dev/part.h"
 
 ALLOC_INIT_HEAP(8192);
 
@@ -380,6 +382,17 @@ static const char *type(const char *text)
 static int last_argc;
 static int cmd_probe(void *args, int argc, char *argv[]);
 
+static char script_path[64], script_name[16];
+
+static int cmd_script(void *args, int argc, char *argv[])
+{
+	if (argc != 3)
+		return -1;
+	strcpy(script_path, argv[1]);
+	strcpy(script_name, argv[2]);
+	return 5;
+}
+
 static int gpio_value;
 
 static int gpio_read(void *args, void *buffer, unsigned int length)
@@ -410,6 +423,28 @@ static int cmd_probe(void *args, int argc, char *argv[])
 {
 	last_argc = argc;
 	return 7;
+}
+
+/* what a command prints with printf (the PC's stdout here) */
+static const char *capture(const char *command)
+{
+	static char text[512];
+	static int saved = -1; /* the real stdout, kept (close() is the kernel's here) */
+	FILE *f = tmpfile();
+
+	if (saved < 0)
+		saved = dup(1);
+
+	fflush(stdout);
+	dup2(fileno(f), 1);
+	system(command);
+	fflush(stdout);
+	dup2(saved, 1);
+	rewind(f);
+	size_t n = fread(text, 1, sizeof(text) - 1, f);
+	text[n] = '\0';
+	fclose(f);
+	return text;
 }
 
 static int read_all(const char *path, char *buf, unsigned size)
@@ -543,7 +578,7 @@ static void test_tree(void)
 	/* Tab on a terminal follows the tree */
 	CHECK(fsi_node_create("term", false, NULL, &term_node) == 0);
 	CHECK(system("std -t term") == 0);
-	CHECK(strcmp(type("pro\t"), "> probe ") == 0);	     /* a command */
+	CHECK(strcmp(type("pro\t"), "/$ probe ") == 0);	     /* a command; the prompt is the directory */
 	CHECK(strcmp(type("/app/to\t"), "/app/tool ") == 0); /* a command by path */
 	CHECK(strcmp(type("ls /tm\t"), "ls /tmp/") == 0);    /* a directory gets a '/' */
 	CHECK(strcmp(type("ls /dev/tt\t"), "ls /dev/ttyS1 ") == 0);
@@ -601,15 +636,170 @@ static void test_tree(void)
 	CHECK(lseek(fd, 0, 0) == 0);
 	close(fd);
 
-	/* the open files left no nodes behind */
-	int used = 0;
-	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
-		used += fsi_nodes_get()[i].used == FSI_NODE_USED &&
-			(uint8_t)fsi_nodes_get()[i].name[0] == 0xFF;
-	CHECK(used == 0);
+	/* open files are not nodes: handles after the table, all closed now */
+	for (int i = 0; i < FSI_MAX_NODES_COUNT + (int)VFS_FILES_MAX; i++)
+		CHECK(vfs_file_get(i) == NULL);
+	int h[VFS_FILES_MAX + 1];
+	for (unsigned i = 0; i <= VFS_FILES_MAX; i++)
+		h[i] = open("/mnt/ee/rc", 0, 0);
+	CHECK(h[0] == FSI_MAX_NODES_COUNT && h[VFS_FILES_MAX] == -1); /* all in use */
+	for (unsigned i = 0; i < VFS_FILES_MAX; i++)
+		CHECK(close(h[i]) == 0);
 
 	/* stdout reached the node it was sent to */
 	CHECK(strstr(sink, "replaced") != NULL);
+
+	/* ls as on Linux: names only, -p marks the directories, -l the type and rwx */
+	CHECK(strcmp(capture("ls /"), "bin  dev  app  tmp  mnt\n") == 0);
+	CHECK(strcmp(capture("ls -p /"), "bin/  dev/  app/  tmp/  mnt/\n") == 0);
+	CHECK(strncmp(capture("ls -l /dev/ee0"), "brw-", 4) == 0);
+	CHECK(strncmp(capture("ls -l /dev/ttyS1"), "c-w-", 4) == 0);
+	CHECK(strncmp(capture("ls -l /mnt/ee/rc"), "-rw-", 4) == 0);
+	CHECK(strncmp(capture("ls -l /mnt"), "drwx", 4) == 0);
+	CHECK(system("mkdir /app/empty") == 0 && strcmp(capture("ls /app/empty"), "") == 0);
+	CHECK(system("rm /app/empty") == 0);
+
+	/* scripts run by name from /home, by path from anywhere; the prompt shows ~ there */
+	CHECK(system("mount -f ram0 /home") == 0);
+	CHECK(system("echo echo hi > /home/hello") == 0);
+	CHECK(system("hello") == -1); /* no interpreter yet */
+	vfs_interpreter_set(cmd_script);
+	CHECK(system("hello") == 5 && strcmp(script_path, "/home/hello") == 0);
+	CHECK(strcmp(script_name, "hello") == 0);
+	CHECK(system("/mnt/ee/rc") == 5 && strcmp(script_name, "rc") == 0);
+	CHECK(system("nothing") == -1);
+	CHECK(vfs_resolve("~/hello", &p) == 0 && p.kind == VFS_FILE);
+	CHECK(vfs_resolve("~", &p) == 0 && p.kind == VFS_DIR && vfs_mount_get(p.dir) != NULL);
+
+	/* directories, mounts and open files take no node: the table holds only fsi nodes */
+	int nodes = 0;
+	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
+		nodes += fsi_nodes_get()[i].used == FSI_NODE_USED;
+	int fd2 = open("~/hello", 0, 0);
+	CHECK(fd2 >= FSI_MAX_NODES_COUNT && vfs_mkdir("/app/d1") == 0 && vfs_mkdir("/app/d1/d2") == 0);
+	int now = 0;
+	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
+		now += fsi_nodes_get()[i].used == FSI_NODE_USED;
+	CHECK(now == nodes && close(fd2) == 0);
+	CHECK(vfs_rename("/app/d1/d2", "/app/d3") == 0 && vfs_rename("/app/d1", "/app/d1/x") == -1);
+	CHECK(vfs_remove("/app/d1") == 0 && vfs_remove("/app/d3") == 0);
+
+	CHECK(system("cd") == 0 && vfs_dir_path(vfs_cwd(), buf, sizeof(buf)) == 0);
+	CHECK(strcmp(buf, "/home") == 0);
+	CHECK(system("std -t term") == 0);
+	CHECK(strstr(type("\r"), "~$ ") != NULL);
+	CHECK(system("std ttyS1") == 0);
+	vfs_interpreter_set(NULL);
+}
+
+/* -------------------------------------------------------------------------- */
+/* two pages of PIC24FJ flash, emulated: ECC (a double word programmed once per erase), power cuts */
+
+#define NV_BASE 0x14800ul
+
+static uint32_t nv_mem[2048]; /* 2 x 1024 instructions, 24 bits each */
+static int nv_budget = -1;    /* flash operations until the power goes, -1: never */
+static int nv_ecc_errors, nv_erases, nv_programs;
+
+static bool nv_cut(void)
+{
+	if (nv_budget == 0)
+		return true;
+	if (nv_budget > 0)
+		nv_budget--;
+	return false;
+}
+
+uint32_t flash24_hw_read(uint32_t addr)
+{
+	return nv_mem[(addr - NV_BASE) / 2];
+}
+
+int flash24_hw_erase(uint32_t addr)
+{
+	if (nv_cut())
+		return -1;
+	uint32_t i = (addr - NV_BASE) / 2;
+	if (i % 1024 != 0)
+		nv_ecc_errors++;
+	for (int k = 0; k < 1024; k++)
+		nv_mem[i + k] = 0xFFFFFF;
+	nv_erases++;
+	return 0;
+}
+
+int flash24_hw_program(uint32_t addr, uint32_t w0, uint32_t w1)
+{
+	if (nv_cut())
+		return -1;
+	uint32_t i = (addr - NV_BASE) / 2;
+	if (i % 2 != 0 || nv_mem[i] != 0xFFFFFF || nv_mem[i + 1] != 0xFFFFFF)
+		nv_ecc_errors++;
+	nv_mem[i] = w0 & 0xFFFFFF;
+	nv_mem[i + 1] = w1 & 0xFFFFFF;
+	nv_programs++;
+	return 0;
+}
+
+static void test_flash24(void)
+{
+	static flash24_t nv;
+	static part_t boot, home;
+	tfs_t fs;
+	char buf[300];
+
+	memset(nv_mem, 0xFF, sizeof(nv_mem)); /* erased: 0xFFFFFF in 32 bits */
+	for (int i = 0; i < 2048; i++)
+		nv_mem[i] = 0xFFFFFF;
+
+	CHECK(flash24_init(&nv, NV_BASE + 2) == -1); /* not page aligned */
+	CHECK(flash24_init(&nv, NV_BASE) == 0 && nv.blk.size == 2044 && nv.live == 0);
+	CHECK(part_init(&boot, &nv.blk, 0, 512) == 0);
+	CHECK(part_init(&home, &nv.blk, 512, nv.blk.size - 512) == 0);
+	CHECK(part_init(&home, &nv.blk, 512, nv.blk.size) == -1); /* past the end */
+	CHECK(part_init(&home, &nv.blk, 512, nv.blk.size - 512) == 0);
+
+	/* both file systems on the one flash */
+	CHECK(tfs_format(&boot.blk, 0, 0) == 0 && tfs_format(&home.blk, 32, 8) == 0);
+	CHECK(tfs_mount(&fs, &boot.blk) == 0 && fill_file(&fs, "rc", 200, TFS_WRITE | TFS_CREATE) == 0);
+	CHECK(tfs_mount(&fs, &home.blk) == 0 && fill_file(&fs, "blink", 300, TFS_WRITE | TFS_CREATE) == 0);
+	CHECK(fill_file(&fs, "rgb", 250, TFS_WRITE | TFS_CREATE | TFS_TRUNC) == 0);
+	CHECK(nv_ecc_errors == 0);
+	printf("vfs: flash24 for 2 file systems and 3 files: %d erases, %d double words\n",
+	       nv_erases, nv_programs);
+
+	/* after a reset: the newer page */
+	CHECK(flash24_init(&nv, NV_BASE) == 0 && nv.gen > 0);
+	CHECK(tfs_mount(&fs, &boot.blk) == 0 && check_file(&fs, "rc", 200));
+	CHECK(tfs_mount(&fs, &home.blk) == 0 && check_file(&fs, "blink", 300));
+	CHECK(check_file(&fs, "rgb", 250));
+
+	/* power cuts at every step of replacing a file: the old file or the new one, never less */
+	uint32_t saved[2048];
+	CHECK(tfs_mount(&fs, &home.blk) == 0 && fill_file(&fs, "cfg", 100, TFS_WRITE | TFS_CREATE) == 0);
+	memcpy(saved, nv_mem, sizeof(saved));
+	int olds = 0, news = 0;
+	for (int budget = 0; budget < 5000; budget++) {
+		memcpy(nv_mem, saved, sizeof(saved));
+		CHECK(flash24_init(&nv, NV_BASE) == 0 && tfs_mount(&fs, &home.blk) == 0);
+		nv_budget = budget;
+		int r = fill_file(&fs, "cfg", 160, TFS_WRITE | TFS_CREATE | TFS_TRUNC);
+		nv_budget = -1;
+		CHECK(flash24_init(&nv, NV_BASE) == 0 && tfs_mount(&fs, &home.blk) == 0);
+		bool old = check_file(&fs, "cfg", 100), new = check_file(&fs, "cfg", 160);
+		CHECK(old || new);
+		CHECK(check_file(&fs, "blink", 300));
+		olds += old;
+		news += new;
+		if (r == 0)
+			break;
+	}
+	CHECK(olds > 0 && news == 1 && nv_ecc_errors == 0);
+
+	/* the raw device: bytes as written, at odd addresses too (it overwrites both file systems) */
+	CHECK(nv.blk.write(&nv.blk, 509, "abcdef", 6) == 0 && nv.blk.read(&nv.blk, 509, buf, 6) == 0);
+	CHECK(memcmp(buf, "abcdef", 6) == 0 && nv_ecc_errors == 0);
+	CHECK(nv.blk.write(&nv.blk, 2040, "wxyz", 4) == 0 && nv.blk.write(&nv.blk, 2043, "12", 2) == -1);
 }
 
 int main(void)
@@ -641,6 +831,7 @@ int main(void)
 	sram23_init(&ram, &ram_spi, CHIP_SIZE);
 	test_tfs(&ram.blk, 128);
 
+	test_flash24();
 	test_tree();
 
 	fprintf(stderr, "vfs: %s\n", failures ? "FAILED" : "ok");

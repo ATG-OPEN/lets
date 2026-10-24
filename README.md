@@ -130,7 +130,7 @@ See [docs/kernel.md](docs/kernel.md) (rules: tasks, memory, nodes, commands, sty
 | `bin/` | shell and its commands |
 | `fsi/` | the node table |
 | `opt/` | optional nodes for a board: `gpa` (a GPIO pin, ADC or DAC channel as a node, in physical units) |
-| `vfs/` | the virtual file system on the node table (`vfs`, `posix`, `bin`), the tiny file system (`tfs`), memory drivers (`dev/`) |
+| `vfs/` | the virtual file system on the node table (`vfs`, `posix`, `bin`), the tiny file system (`tfs`), memory drivers (`dev/`: SPI EEPROM, SPI SRAM, RAM disk, PIC24FJ flash, partitions) |
 | `argscript/` | the script language |
 | `lib/` | `args` (command-line parsing) and the portable libraries, see [lib/README.md](lib/README.md) |
 | `port/host/` | the PC build |

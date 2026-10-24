@@ -21,10 +21,11 @@
  * `cat /mnt/ee/boot.as`, `as /mnt/ee/boot.as`, `cd /tmp`, `ls -l /dev`.
  *
  * How it fits in the fsi table without new fields: /bin and /dev are views of
- * the plain nodes (no directory entries needed); a node in any other
- * directory carries that directory in the first byte of its name (0x80 | the
- * directory's index, so such names have 14 characters). An open file is a
- * hidden node that lives until close().
+ * the plain nodes; a node in any other directory carries that directory in
+ * the first byte of its name (0x80 | the directory's id, so such names have
+ * 14 characters). Directories and mount points are in a table of vfs's own
+ * (VFS_DIRS_MAX), and an open file's handle comes after the node table
+ * (vfs_file_open()), so vfs itself takes no place in the node table.
  *
  * A project uses vfs/posix.c instead of kernel/posix.c (the C library calls
  * with path support) and boots:
@@ -64,6 +65,17 @@
 #define VFS_BIN	 1u  /**< Directory id of /bin. */
 #define VFS_DEV	 2u  /**< Directory id of /dev. */
 #define VFS_PATH_MAX 64u /**< Longest path printed by pwd / df. */
+#ifndef VFS_DIRS_MAX
+#define VFS_DIRS_MAX 8u /**< Directories and mount points besides /, /bin and /dev. */
+#endif
+#define VFS_DIR_NAME  12u /**< Directory name length, including the 0. */
+#define VFS_DIR_FIRST 3u  /**< Ids of the directories: VFS_DIR_FIRST .. + VFS_DIRS_MAX - 1. */
+#ifndef VFS_FILES_MAX
+#define VFS_FILES_MAX 4u /**< Files open at the same time (handles after the node table). */
+#endif
+#ifndef VFS_HOME
+#define VFS_HOME "/home" /**< `cd` with no argument, `~` in the prompt, scripts run by name. */
+#endif
 
 /** What a path names. */
 enum VFS_KIND {
@@ -76,7 +88,7 @@ enum VFS_KIND {
 /** A resolved path. */
 typedef struct {
 	uint8_t kind;		  /**< enum VFS_KIND. */
-	uint8_t dir;		  /**< Directory id: VFS_ROOT, _BIN, _DEV or a node. */
+	uint8_t dir;		  /**< Directory id: VFS_ROOT, _BIN, _DEV or VFS_DIR_FIRST + k. */
 	int16_t node;		  /**< Node index for VFS_NODE, else -1. */
 	char name[TFS_NAME_SIZE]; /**< The last part of the path. */
 } vfs_path_t;
@@ -87,7 +99,8 @@ typedef struct {
 	uint8_t kind;		  /**< VFS_DIR, VFS_NODE or VFS_FILE. */
 	bool mount;		  /**< A mount point (kind VFS_DIR). */
 	bool hidden;		  /**< A hidden node. */
-	int16_t node;		  /**< Node index (node or table directory), or -1. */
+	bool block;		  /**< A block device (vfs_blk_register()). */
+	int16_t node;		  /**< Node index for VFS_NODE, else -1. */
 	uint32_t size;		  /**< File size. */
 } vfs_dirent_t;
 
@@ -181,15 +194,21 @@ int vfs_mount(const char *dev, const char *path, bool format);
 int vfs_umount(const char *path);
 
 /**
- * @brief Opens a file of a mounted file system as a node.
+ * @brief Opens a file of a mounted file system.
  *
  * Used by open(). Flags 0 opens like an fsi RAM file: reads from the start,
  * writes append. O_WRONLY / O_RDWR write at the position; O_CREAT, O_EXCL,
  * O_TRUNC (atomic replace at close) and O_APPEND as POSIX.
  *
- * @return The handle (node index), or -1.
+ * An open file is not a node: its handle is FSI_MAX_NODES_COUNT + k, k <
+ * VFS_FILES_MAX, so open files never fill the node table.
+ *
+ * @return The handle, or -1.
  */
 int vfs_file_open(const vfs_path_t *p, int flags);
+
+/** @brief Commits and closes the file behind @p handle (used by close()). @return 0 or -1. */
+int vfs_file_close(int handle);
 
 /**
  * @brief Creates a RAM file (kernel `touch`, 126 bytes) where @p p, a VFS_NONE path, points.
@@ -199,6 +218,19 @@ int vfs_tmp_create(const vfs_path_t *p);
 
 /** @brief Returns the open file behind @p handle, or NULL when it is not a file. */
 tfs_file_t *vfs_file_get(int handle);
+
+/**
+ * @brief Sets what runs a script typed as a command, like `#!` on Linux.
+ *
+ * A command that is a file (`/home/blink`, `./blink`, a RAM file) or the
+ * name of a file in VFS_HOME (`blink`) is run as
+ * run(NULL, 3, {"exec", path, name}). With argscript:
+ * @code
+ * vfs_interpreter_set(argscript_execute);   // `blink` runs /home/blink as task "blink"
+ * @endcode
+ * The words after the name are not passed. NULL: scripts are not run.
+ */
+void vfs_interpreter_set(int (*run)(void *args, int argc, char *argv[]));
 
 /** @brief Registers the vfs commands (call after shell_initialize()). @return 0. */
 int vfs_bin_initialize(void);

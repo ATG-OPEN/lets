@@ -30,7 +30,10 @@
 /* -------------------------------------------------------------------------- */
 
 #define AS_WAIT_MAX  30000u /* longest single task sleep in ms */
-#define AS_FILE_SIZE 128u   /* longest script read from a node */
+#define AS_FILE_SIZE 128u   /* longest script read from a node without a size */
+#ifndef AS_FILE_MAX
+#define AS_FILE_MAX 1024u /* longest script read from a file (a node lseek() can size) */
+#endif
 
 /* kinds of block on the block stack */
 enum {
@@ -829,7 +832,21 @@ int argscript_execute(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-	as_state_t *s = as_new(AS_FILE_SIZE);
+	/* a file has a size: read all of it; another node: what one read gives */
+	long end = (long)lseek(fd, 0, SEEK_END);
+	unsigned int size = AS_FILE_SIZE;
+
+	if (end >= (long)AS_FILE_MAX) {
+		close(fd);
+		printf("too long\n");
+		return -1;
+	}
+
+	if (end > 0 && lseek(fd, 0, SEEK_SET) == 0) {
+		size = (unsigned int)end + 1u;
+	}
+
+	as_state_t *s = as_new((uint16_t)size);
 
 	if (s == NULL) {
 		close(fd);
@@ -837,7 +854,7 @@ int argscript_execute(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-	int n = read(fd, s->text, AS_FILE_SIZE - 1);
+	int n = read(fd, s->text, size - 1u);
 	close(fd);
 
 	s->text[(n < 0) ? 0 : n] = '\0';

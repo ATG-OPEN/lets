@@ -96,8 +96,19 @@ argscript_start("selftest", selftest);    /* a new task named "selftest" */
 > kill probe                 stop it at any time
 ```
 
-`as` copies the script out of the node before it starts (up to 127 bytes), so
-the node can be changed or deleted while the script runs.
+`as` copies the script out of the node before it starts, so the node can be
+changed or deleted while the script runs. A file (one that `lseek()` can size,
+such as a file on a vfs mount) is read whole, up to `AS_FILE_MAX` (1023
+bytes); any other node gives what one read returns, up to 127 bytes. The copy
+is on the heap while the script runs: about 300 bytes plus the script.
+
+With vfs, `vfs_interpreter_set(argscript_execute)` makes scripts commands: a
+file in `/home` runs by its name, any other by its path, as a task of its name:
+
+```text
+~$ blink                      runs /home/blink as the task "blink"
+~$ kill blink
+```
 
 ---
 
@@ -661,9 +672,10 @@ Stop them with `kill fast` and `kill slow`.
   per script. Variable text is cut to 23 characters.
 - **Lines are cut at 95 characters** when read, and a line that grows longer
   than that through `$` expansion is an error.
-- **`as` reads at most 127 bytes** of script from a node. Start longer
-  scripts from C with `argscript_start()`, or split them into several nodes
-  and call one from another with `as`.
+- **`as` reads at most 127 bytes** from a node without a size (a RAM file),
+  and up to 1023 bytes (`AS_FILE_MAX`) from a file. Start longer scripts from
+  C with `argscript_start()`, or split them and call one from another with
+  `as`.
 - **Numbers have 7 significant digits.** Above 9 999 999, counters lose
   precision (and print as `1e+07`, for example).
 - **`goto` closes every open block.** Do not jump into a loop or an `if`.
