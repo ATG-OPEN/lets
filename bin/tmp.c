@@ -2,8 +2,9 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * RAM files: `touch name` creates a node with a small buffer; writes append
- * to it and reads return it from the start.
+ * RAM files: `touch NAME` creates a node with a small buffer (TMP_FILE_SIZE
+ * bytes); a write appends to it, a read returns it from the start, `rm NAME`
+ * deletes it.
  */
 
 #include "tmp.h"
@@ -31,52 +32,73 @@ fsi_handler_t tmp_node = {
 	.close_handler = NULL,
 };
 
+/* the RAM file named @name, -1 if none */
+static int tmp_find(const char *name)
+{
+	fsi_node_t *n = fsi_nodes_get();
+
+	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
+		if (n[i].used == FSI_NODE_USED && strcmp(n[i].name, name) == 0) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
 int tmp_file_create(void *args, int argc, char *argv[])
 {
-	if (argc != 2) {
+	if (argc != 2 || strcmp(argv[1], "-help") == 0) {
+		printf("usage: touch NAME\n");
 		return -1;
+	}
+
+	/* a name that is taken: nothing to do, as touch on an existing file */
+	if (tmp_find(argv[1]) >= 0) {
+		return 0;
 	}
 
 	tmp_args_t *a = malloc(sizeof(tmp_args_t));
 
 	if (a == NULL) {
+		printf("out of memory\n");
 		return -1;
 	}
 
 	a->size = 0;
 
-	return fsi_node_create(argv[1], false, a, &tmp_node);
+	if (fsi_node_create(argv[1], false, a, &tmp_node) < 0) {
+		free(a);
+		printf("out of memory\n"); /* the node table is full */
+		return -1;
+	}
+
+	return 0;
 }
 
 int tmp_file_delete(void *args, int argc, char *argv[])
 {
-	if (argc != 2) {
+	if (argc != 2 || strcmp(argv[1], "-help") == 0) {
+		printf("usage: rm NAME\n");
 		return -1;
 	}
 
-	args = NULL;
+	int i = tmp_find(argv[1]);
 
-	/* the node's buffer, freed before the node goes */
-	fsi_node_t *n = fsi_nodes_get();
-
-	for (int i = 1; i < FSI_MAX_NODES_COUNT; i++) {
-		if ((n + i)->used != FSI_NODE_USED) {
-			continue;
-		}
-
-		if (strcmp((n + i)->name, argv[1]) != 0) {
-			continue;
-		}
-
-		args = (n + i)->args;
-
-		break;
+	if (i < 0) {
+		printf("not found\n");
+		return -1;
 	}
 
-	if (args != NULL) {
-		free(args);
-		args = NULL;
+	/* only RAM files: a device's args belong to its driver */
+	fsi_node_t *n = fsi_nodes_get() + i;
+
+	if (n->handlers != &tmp_node) {
+		printf("bad argument\n");
+		return -1;
 	}
+
+	free(n->args);
 
 	return fsi_node_delete(argv[1]);
 }

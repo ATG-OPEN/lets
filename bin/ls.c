@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Copyright (c) 2026 ATG */
 
+/*
+ * ls [-a] [-l]: the node table. Plain: the names, two spaces apart. -l: one
+ * node per line, its handle, what it can do and its name. -a: the hidden
+ * nodes too (the commands, stdin / stdout / stderr).
+ */
+
 #include "ls.h"
 
 #include "../fsi/fsi.h"
@@ -10,95 +16,69 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* one line of -l: handle, then o c r w s x for each handler it has, h when hidden */
+static void ls_long(int i, const fsi_node_t *n)
+{
+	const fsi_handler_t *h = n->handlers;
+	char can[8];
+
+	can[0] = h->open_handler ? 'o' : '-';
+	can[1] = h->close_handler ? 'c' : '-';
+	can[2] = h->read_handler ? 'r' : '-';
+	can[3] = h->write_handler ? 'w' : '-';
+	can[4] = h->lseek_handler ? 's' : '-';
+	can[5] = h->execute_handler ? 'x' : '-';
+	can[6] = n->hidden ? 'h' : '-';
+	can[7] = '\0';
+
+	printf("%2d  %s  %s\n", i, can, n->name);
+}
+
 int ls(void *args, int argc, char *argv[])
 {
-	if (argc > 2) {
-		printf("bad argument\n");
+	bool hidden = false; /* -a */
+	bool list = false;   /* -l */
 
-		return -1;
-	}
+	for (int i = 1; i < argc; i++) {
+		const char *c = argv[i];
 
-	bool hidden = false; /* -a: hidden nodes too */
-	bool list = false;   /* -l: one node per line */
-
-	if (argc == 2) {
-		if (strcmp(argv[1], "-a") == 0) {
-			hidden = true;
-		} else if (strcmp(argv[1], "-l") == 0) {
-			list = true;
-		} else if (strcmp(argv[1], "-la") == 0) {
-			hidden = true;
-			list = true;
-		} else {
-			printf("bad argument\n");
+		if (*c++ != '-' || *c == '\0') {
+			printf("usage: ls [-a] [-l]\n");
 			return -1;
+		}
+
+		for (; *c != '\0'; c++) {
+			if (*c == 'a') {
+				hidden = true;
+			} else if (*c == 'l') {
+				list = true;
+			} else {
+				printf("usage: ls [-a] [-l]\n");
+				return -1;
+			}
 		}
 	}
 
 	fsi_node_t *n = fsi_nodes_get();
+	int count = 0;
 
-	char *lstring = malloc(128);
-	if (!lstring) {
-		return -1;
-	}
-
-	int ls_size = 0;
-	lstring[0] = '\0';
-
-	if (list == false) {
-		/* the names on one line, separated by spaces */
-		for (int i = 0; i < FSI_MAX_NODES_COUNT; i++) {
-			if ((n + i)->used != FSI_NODE_USED) {
-				continue;
-			}
-
-			if ((n + i)->hidden == true && hidden == false) {
-				continue;
-			}
-
-			const char *name = (n + i)->name;
-			int name_len = strnlen(name, FSI_NODE_NAME_MAX_LENGTH);
-
-			/* room for the name, a space and the 0 */
-			if (ls_size + name_len + 2 >= 128) {
-				break;
-			}
-
-			memcpy(lstring + ls_size, name, name_len);
-			ls_size += name_len;
-
-			lstring[ls_size++] = ' ';
-			lstring[ls_size] = '\0';
+	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++) {
+		if (n[i].used != FSI_NODE_USED || n[i].handlers == NULL || (n[i].hidden && !hidden)) {
+			continue;
 		}
 
-		printf("%s\n", lstring);
-	} else {
-		/* a table: which handlers each node has */
-		printf("fd\tname\thide\t\topen\tclose\tread\twrite\tlseek\texec\n");
-
-		for (int i = 0; i < FSI_MAX_NODES_COUNT; i++) {
-			if ((n + i)->used != FSI_NODE_USED) {
-				continue;
-			}
-
-			if ((n + i)->hidden == true && hidden == false) {
-				continue;
-			}
-
-			printf("%i\t%s\t%s\t\t%s\t%s\t%s\t%s\t%s\t%s\n", i, (n + i)->name,
-			       (n + i)->hidden ? "true" : "false",
-			       ((n + i)->handlers->open_handler == NULL) ? "false" : "true",
-			       ((n + i)->handlers->close_handler == NULL) ? "false" : "true",
-			       ((n + i)->handlers->read_handler == NULL) ? "false" : "true",
-			       ((n + i)->handlers->write_handler == NULL) ? "false" : "true",
-			       ((n + i)->handlers->lseek_handler == NULL) ? "false" : "true",
-			       ((n + i)->handlers->execute_handler == NULL) ? "false" : "true");
-
-			ls_size++;
+		if (list) {
+			ls_long(i, &n[i]);
+		} else {
+			printf("%s%s", count > 0 ? "  " : "", n[i].name);
 		}
+
+		count++;
 	}
 
-	free(lstring);
+	if (!list && count > 0) {
+		printf("\n");
+	}
 
-	return ls_size;
+	return count;
 }

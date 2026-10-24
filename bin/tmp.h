@@ -8,10 +8,16 @@
 
 #include <stdint.h>
 
-/** @brief The `touch <name>` command: creates a RAM file (126 bytes). */
+/**
+ * @brief The `touch NAME` command: creates a RAM file (126 bytes).
+ * @return 0 (also when NAME exists), or -1 when the heap or the node table is full.
+ */
 int tmp_file_create(void *args, int argc, char *argv[]);
 
-/** @brief The `rm <name>` command: deletes a RAM file. */
+/**
+ * @brief The `rm NAME` command: deletes a RAM file.
+ * @return 0, or -1 when there is no such RAM file (devices are not removed).
+ */
 int tmp_file_delete(void *args, int argc, char *argv[]);
 
 /** @brief Write handler of a RAM file: appends; -1 when it does not fit. */

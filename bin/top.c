@@ -13,18 +13,14 @@
 
 int top(void *args, int argc, char *argv[])
 {
-	if (argc > 2) {
-		return -1;
+	if (argc == 2 && strcmp(argv[1], "mem") == 0) {
+		alloc_info();
+		return 0;
 	}
 
-	if (argc == 2) {
-		if (strcmp(argv[1], "mem") != 0) {
-			return -1;
-		}
-
-		alloc_info();
-
-		return 0;
+	if (argc != 1) {
+		printf("usage: top [mem]\n");
+		return -1;
 	}
 
 	task_t *t = task_get_data();

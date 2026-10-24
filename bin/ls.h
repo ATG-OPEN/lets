@@ -7,8 +7,16 @@
 /**
  * @brief The `ls [-a] [-l]` command: lists the nodes.
  *
- * -a also lists hidden nodes (commands), -l prints one node per line with the
- * handlers it has. Returns the number of nodes printed with -l.
+ * Plain: the names on one line. -l: one node per line, its handle and what
+ * it can do (o open, c close, r read, w write, s lseek, x execute, h hidden):
+ * @code
+ *  3  --rw-x-  ttyS1
+ *  9  -----xh  ls
+ * @endcode
+ * -a also lists the hidden nodes (commands, stdin, stdout, stderr); options
+ * combine (-la, -al).
+ *
+ * @return The number of nodes listed, or -1.
  */
 int ls(void *args, int argc, char *argv[]);
 

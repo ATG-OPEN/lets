@@ -105,7 +105,7 @@ static void shell_redraw(unsigned int shown)
 /* -------------------------------------------------------------------------- */
 /* Tab: complete the word under the cursor with the names in the node table */
 
-/* the name of node @p i as typed, NULL for an unused or an open-file node */
+/* the name of node @p i as typed, NULL for an unused node */
 static const char *shell_node_name(int i)
 {
 	fsi_node_t *n = fsi_nodes_get() + i;
@@ -115,10 +115,6 @@ static const char *shell_node_name(int i)
 	}
 
 	const char *name = n->name;
-
-	if ((uint8_t)name[0] == 0xFF) {
-		return NULL; /* an open file (vfs) */
-	}
 
 	if ((uint8_t)name[0] & 0x80) {
 		name++; /* in a vfs directory: the first byte is the directory */

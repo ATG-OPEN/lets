@@ -8,6 +8,13 @@
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
 #include "../bin/shell.h"
+#include "../bin/cat.h"
+#include "../bin/echo.h"
+#include "../bin/kill.h"
+#include "../bin/ls.h"
+#include "../bin/mv.h"
+#include "../bin/tmp.h"
+#include "../bin/top.h"
 #include "../fsi/fsi.h"
 
 #include <time.h>
@@ -223,6 +230,40 @@ static int checks(void *args, uint64_t t)
 		return 0;
 	}
 	if (step == 2) {
+		/* the commands (their messages go to the PC's stdout here) */
+		fsi_register_app("cat", cat);
+		fsi_register_app("echo", echo);
+		fsi_register_app("kill", kill);
+		fsi_register_app("ls", ls);
+		fsi_register_app("mv", mv);
+		fsi_register_app("top", top);
+		fsi_register_app("touch", tmp_file_create);
+		fsi_register_app("rm", tmp_file_delete);
+
+		CHECK(system("touch f") == 0 && system("touch f") == 0); /* the second: no-op */
+		CHECK(system("echo hello  world > f") == 0 && system("echo again >> f") == 0);
+		char text[32] = {0};
+		int fd = open("f", 0, 0);
+		CHECK(read(fd, text, sizeof(text) - 1) == 18 && close(fd) == 0);
+		CHECK(strcmp(text, "hello world\nagain\n") == 0);
+		CHECK(system("cat f") == 18 && system("cat -x f") == 18);
+		CHECK(system("cat") == -1 && system("cat -y f") == -1 && system("cat nothing") == -1);
+		CHECK(system("echo a > f b") == -1 && system("echo a > nothing") == -1);
+
+		CHECK(system("mv f g") == 0 && open("f", 0, 0) < 0 && open("g", 0, 0) > 2);
+		CHECK(system("mv g sink") == -1);		  /* taken */
+		CHECK(system("mv g 0123456789abcdef") == -1); /* too long */
+		CHECK(system("mv stdout x") == -1);		  /* the standard streams stay */
+		CHECK(system("mv nothing x") == -1);
+
+		CHECK(system("rm sink") == -1 && open("sink", 0, 0) > 2); /* not a RAM file */
+		CHECK(system("rm g") == 0 && system("rm g") == -1);
+
+		CHECK(system("ls") > 0 && system("ls -al") > system("ls -l"));
+		CHECK(system("ls -x") == -1 && system("ls a") == -1);
+		CHECK(system("kill nothing") == -1 && system("kill") == -1);
+		CHECK(system("top") == 0 && system("top x") == -1);
+
 		fprintf(stderr, "kernel: %s\n", failures ? "FAILED" : "ok");
 		exit(failures != 0);
 	}

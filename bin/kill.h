@@ -5,7 +5,12 @@
 #define KILL_H
 
 /**
- * @brief The `kill <task>` command: stops a task by name and frees its memory.
+ * @brief The `kill TASK` command: stops a task by name (see `top`).
+ *
+ * The task's memory is freed. A task may kill itself; it is not called
+ * again.
+ *
+ * @return 0, or -1 when there is no such task.
  */
 int kill(void *args, int argc, char *argv[]);
 
