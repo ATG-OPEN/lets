@@ -209,7 +209,7 @@ static fsi_node_t *posix_command(const char *name, bool *found)
 		return t[p.node].handlers->execute_handler != NULL ? t + p.node : NULL;
 	}
 
-	/* plain nodes first (fsi), then /app and the other directories */
+	/* plain nodes first (fsi), then /opt and the other directories */
 	for (int pass = 0; pass < 2; pass++) {
 		for (int i = 2; i < FSI_MAX_NODES_COUNT; i++) {
 			fsi_node_t *n = posix_node(i);
@@ -266,7 +266,7 @@ static bool posix_script(const char *name, char *path)
 }
 
 /*
- * Runs a command line: the first word names a command (`ls`, `/app/trgmon`),
+ * Runs a command line: the first word names a command (`ls`, `/opt/trgmon`),
  * whose handler gets the words as argc / argv. A script (a file at a path,
  * or by its name in VFS_HOME) goes to the interpreter set with
  * vfs_interpreter_set(), as a task of its name. `reboot` is built in. Returns

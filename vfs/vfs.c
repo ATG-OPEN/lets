@@ -909,7 +909,7 @@ int vfs_initialize(void)
 	vfs_cwd_dir = VFS_ROOT;
 	memset(vfs_dirs, 0, sizeof(vfs_dirs));
 
-	if (vfs_mkdir("/app") < 0 || vfs_mkdir("/tmp") < 0 || vfs_mkdir("/mnt") < 0) {
+	if (vfs_mkdir("/opt") < 0 || vfs_mkdir("/tmp") < 0 || vfs_mkdir("/mnt") < 0) {
 		return -1;
 	}
 

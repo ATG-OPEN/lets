@@ -15,7 +15,7 @@ board can be configured, tested and driven over a serial line without reflashing
 - **The C library, provided by the kernel**: `open`, `read`, `write`, `close`, `lseek`,
   `system`, `malloc`, `free` (XC16 links them from the kernel). A fixed heap with per-task
   ownership: when a task ends, its memory is freed.
-- **Virtual file system (optional)**: `/bin`, `/dev`, `/app`, `/tmp`, `/mnt`, paths everywhere,
+- **Virtual file system (optional)**: `/bin`, `/dev`, `/opt`, `/tmp`, `/mnt`, paths everywhere,
   and a tiny power-loss-safe file system for SPI EEPROM / SPI SRAM (`mount ee0 /mnt/ee`) for
   configs, scripts and firmware images. It is built on the unchanged node table, so fsi code
   runs on it as it is.
@@ -103,7 +103,7 @@ memory drivers you need from `vfs/dev/` (25xx SPI EEPROM, 23xx SPI SRAM, RAM dis
 
 ```c
 fsi_initialize();
-vfs_initialize();                               // /app, /tmp, /mnt
+vfs_initialize();                               // /opt, /tmp, /mnt
 board_initialize();                             // as before, plus:
 ee25_init(&ee0, &ee_spi, 131072, 256);          // 25LC1024
 vfs_blk_register("ee0", &ee0.blk);              // /dev/ee0

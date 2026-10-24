@@ -4,7 +4,7 @@
 /*
  * vfs host test: the tiny file system on a RAM disk and on emulated SPI chips (25LC1024 EEPROM,
  * 23LC1024 SRAM, byte by byte as the real ones answer), power loss, and the tree over the fsi
- * table: paths, bare fsi names, /bin, /dev, /app, /tmp, mounts, open / read / write / lseek and
+ * table: paths, bare fsi names, /bin, /dev, /opt, /tmp, mounts, open / read / write / lseek and
  * the shell commands.
  */
 #include "../kernel/task.h"
@@ -488,11 +488,11 @@ static void test_tree(void)
 	CHECK(system("/bin/probe a") == 7 && last_argc == 2);
 	CHECK(system("ttyS1") == -1 && system("nothing") == -1);
 
-	/* /app */
-	CHECK(vfs_register_app("/app/tool", cmd_probe) == 0);
-	CHECK(vfs_resolve("/app/tool", &p) == 0 && p.kind == VFS_NODE);
+	/* /opt */
+	CHECK(vfs_register_app("/opt/tool", cmd_probe) == 0);
+	CHECK(vfs_resolve("/opt/tool", &p) == 0 && p.kind == VFS_NODE);
 	CHECK(vfs_resolve("/bin/tool", &p) == 0 && p.kind == VFS_NONE);
-	CHECK(system("/app/tool x y z") == 7 && last_argc == 4);
+	CHECK(system("/opt/tool x y z") == 7 && last_argc == 4);
 	CHECK(system("tool 1") == 7 && last_argc == 2);
 
 	/* directories */
@@ -579,7 +579,7 @@ static void test_tree(void)
 	CHECK(fsi_node_create("term", false, NULL, &term_node) == 0);
 	CHECK(system("std -t term") == 0);
 	CHECK(strcmp(type("pro\t"), "/$ probe ") == 0);	     /* a command; the prompt is the directory */
-	CHECK(strcmp(type("/app/to\t"), "/app/tool ") == 0); /* a command by path */
+	CHECK(strcmp(type("/opt/to\t"), "/opt/tool ") == 0); /* a command by path */
 	CHECK(strcmp(type("ls /tm\t"), "ls /tmp/") == 0);    /* a directory gets a '/' */
 	CHECK(strcmp(type("ls /dev/tt\t"), "ls /dev/ttyS1 ") == 0);
 	CHECK(strcmp(type("ls /dev/le\t"), "ls /dev/led1 ") == 0);
@@ -591,7 +591,7 @@ static void test_tree(void)
 	CHECK(strcmp(type("cat bo\t"), "cat boot.as ") == 0); /* the working directory */
 	CHECK(strcmp(type("std tt\t"), "std ttyS1 ") == 0);   /* not here: a bare fsi name */
 	const char *s = type("ls ../\t");		      /* the directory one up only */
-	CHECK(strstr(s, "\r\nbin/  dev/  app/  tmp/  mnt/  \r\n") != NULL);
+	CHECK(strstr(s, "\r\nbin/  dev/  opt/  tmp/  mnt/  \r\n") != NULL);
 	CHECK(strstr(s, "probe") == NULL && strstr(s, "ttyS1") == NULL);
 	CHECK(strcmp(type("ls ../m\t"), "ls ../mnt/") == 0);
 	CHECK(strcmp(type("ls ../mnt/\t"), "ls ../mnt/ee/") == 0); /* the only entry */
@@ -650,14 +650,14 @@ static void test_tree(void)
 	CHECK(strstr(sink, "replaced") != NULL);
 
 	/* ls as on Linux: names only, -p marks the directories, -l the type and rwx */
-	CHECK(strcmp(capture("ls /"), "bin  dev  app  tmp  mnt\n") == 0);
-	CHECK(strcmp(capture("ls -p /"), "bin/  dev/  app/  tmp/  mnt/\n") == 0);
+	CHECK(strcmp(capture("ls /"), "bin  dev  opt  tmp  mnt\n") == 0);
+	CHECK(strcmp(capture("ls -p /"), "bin/  dev/  opt/  tmp/  mnt/\n") == 0);
 	CHECK(strncmp(capture("ls -l /dev/ee0"), "brw-", 4) == 0);
 	CHECK(strncmp(capture("ls -l /dev/ttyS1"), "c-w-", 4) == 0);
 	CHECK(strncmp(capture("ls -l /mnt/ee/rc"), "-rw-", 4) == 0);
 	CHECK(strncmp(capture("ls -l /mnt"), "drwx", 4) == 0);
-	CHECK(system("mkdir /app/empty") == 0 && strcmp(capture("ls /app/empty"), "") == 0);
-	CHECK(system("rm /app/empty") == 0);
+	CHECK(system("mkdir /opt/empty") == 0 && strcmp(capture("ls /opt/empty"), "") == 0);
+	CHECK(system("rm /opt/empty") == 0);
 
 	/* scripts run by name from /home, by path from anywhere; the prompt shows ~ there */
 	CHECK(system("mount -f ram0 /home") == 0);
@@ -676,13 +676,13 @@ static void test_tree(void)
 	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
 		nodes += fsi_nodes_get()[i].used == FSI_NODE_USED;
 	int fd2 = open("~/hello", 0, 0);
-	CHECK(fd2 >= FSI_MAX_NODES_COUNT && vfs_mkdir("/app/d1") == 0 && vfs_mkdir("/app/d1/d2") == 0);
+	CHECK(fd2 >= FSI_MAX_NODES_COUNT && vfs_mkdir("/opt/d1") == 0 && vfs_mkdir("/opt/d1/d2") == 0);
 	int now = 0;
 	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
 		now += fsi_nodes_get()[i].used == FSI_NODE_USED;
 	CHECK(now == nodes && close(fd2) == 0);
-	CHECK(vfs_rename("/app/d1/d2", "/app/d3") == 0 && vfs_rename("/app/d1", "/app/d1/x") == -1);
-	CHECK(vfs_remove("/app/d1") == 0 && vfs_remove("/app/d3") == 0);
+	CHECK(vfs_rename("/opt/d1/d2", "/opt/d3") == 0 && vfs_rename("/opt/d1", "/opt/d1/x") == -1);
+	CHECK(vfs_remove("/opt/d1") == 0 && vfs_remove("/opt/d3") == 0);
 
 	/* ed: one line per command */
 	CHECK(fsi_register_app("ed", vfs_ed) == 0);

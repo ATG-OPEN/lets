@@ -8,7 +8,7 @@ fsi keeps working: drivers, apps, startup scripts, argscripts, `std ttyS1`, `ech
 /
 ├── bin/    commands: every node that only executes (fsi_register_app)
 ├── dev/    devices: every plain fsi node that can be read or written (ttyS1, led1, ain1, lcd, ee0, ...)
-├── app/    project applications (vfs_register_app("/app/trgmon", ...))
+├── opt/    project applications (vfs_register_app("/opt/trgmon", ...))
 ├── tmp/    RAM files (touch), or a file system on SPI SRAM / a RAM disk mounted over it
 ├── mnt/    mounted file systems: /mnt/ee on the SPI EEPROM (configs, scripts, firmware images)
 ├── boot/   (a mount) the startup script, rc
@@ -38,7 +38,7 @@ Compatibility, both ways:
 - A bare name that isn't in the working directory is looked up among all plain nodes, the same
   way fsi does it. `open("ttyS1", 0, 0)` works from any directory.
 - Code that walks `fsi_nodes_get()` still sees every node. A node in a vfs directory such as
-  `/app` or `/tmp` has the directory in the first byte of its name (`0x80 | id`), so its name
+  `/opt` or `/tmp` has the directory in the first byte of its name (`0x80 | id`), so its name
   can be up to 14 characters instead of 15.
 - vfs itself takes no place in the node table (40 entries, fixed by `fsi.h`): directories and
   mount points are in a table of its own (`VFS_DIRS_MAX` = 8, names up to 11 characters, 16
@@ -63,7 +63,7 @@ int main(void)
 
     task_initialize(system_time_get);
     fsi_initialize();
-    vfs_initialize();                           // /app, /tmp, /mnt
+    vfs_initialize();                           // /opt, /tmp, /mnt
 
     board_initialize();                         // device nodes, as with fsi
     ee25_init(&ee0, &ee_spi, 131072, 256);
@@ -212,9 +212,17 @@ vfs_mount("nv1", "/home", true);
 - `noload` keeps the pages out of the hex. Program with `ipecmd ... -OP14800-157FF` (in MPLAB X:
   "Preserve Program Memory", range 14800-157ff) so that a firmware update keeps the files.
 
-`home/DEMO.X` (PIC24FJ128GL306) boots this way. `apps/nvfs.c` installs `/boot/rc` and four
-demo scripts in `/home` (blink, rgb, knob, buttons) on a new board, and leaves existing ones as
-they are.
+`home/DEMO.X` (PIC24FJ128GL306) boots this way, and its demo has no C code: it is scripts.
+`apps/nvfs.c` installs them on a new board and leaves existing ones as they are:
+
+```text
+/boot/rc         console set up in main.c, then: pot scale, a banner, demo, cd
+/home/demo       the launcher: S1 kills the running app and starts the next
+/home/blink      LED1 and LED2 take turns
+/home/rgb        red, green, blue in turn, the pot sets the speed
+/home/knob       the pot in percent on the LCD
+/home/buttons    S1 lights LED1, S2 LED2 (not in the launcher: it uses S1)
+```
 
 ## Firmware images
 

@@ -13,7 +13,7 @@
  *   /bin    the commands: every node that only executes (fsi_register_app)
  *   /dev    the devices: every plain fsi node that can be read or written,
  *           also when it takes commands too (ttyS1, a GPIO, ain1, ee0, ...)
- *   /app    project applications (vfs_register_app("/app/trgmon", ...))
+ *   /opt    project applications (vfs_register_app("/opt/trgmon", ...))
  *   /tmp    RAM files (touch), or a file system mounted over it
  *   /mnt    mount points of file systems on SPI EEPROM / SRAM (mount ee0 /mnt/ee)
  *
@@ -31,7 +31,7 @@
  * with path support) and boots:
  * @code
  * fsi_initialize();
- * vfs_initialize();                        // /app, /tmp, /mnt
+ * vfs_initialize();                        // /opt, /tmp, /mnt
  * board_initialize();                      // devices, vfs_blk_register("ee0", ...)
  * shell_initialize(startup);
  * vfs_bin_initialize();                    // path-aware ls, cat, cp, mount, ...
@@ -104,7 +104,7 @@ typedef struct {
 	uint32_t size;		  /**< File size. */
 } vfs_dirent_t;
 
-/** @brief Creates /app, /tmp and /mnt and sets the working directory to /. @return 0 or -1. */
+/** @brief Creates /opt, /tmp and /mnt and sets the working directory to /. @return 0 or -1. */
 int vfs_initialize(void);
 
 /**
@@ -128,7 +128,7 @@ int vfs_resolve(const char *path, vfs_path_t *p);
 int vfs_node_create(const char *path, bool hidden, void *args, fsi_handler_t *handlers);
 
 /**
- * @brief Registers a command at @p path (`/app/trgmon`); a bare name goes to /bin.
+ * @brief Registers a command at @p path (`/opt/trgmon`); a bare name goes to /bin.
  * @return 0 or -1.
  */
 int vfs_register_app(const char *path, int (*execute_handler)(void *args, int argc, char *argv[]));
