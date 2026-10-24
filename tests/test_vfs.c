@@ -624,6 +624,16 @@ int main(void)
 	test_tfs(&disk.blk, 128);
 	test_power_loss(&disk.blk);
 
+	/* format without parameters: sized to the device, even a tiny one */
+	ramdisk_t tiny;
+	tfs_t tfs;
+	ramdisk_init(&tiny, mem, 512);
+	CHECK(tfs_format(&tiny.blk, 0, 0) == 0 && tfs_mount(&tfs, &tiny.blk) == 0);
+	CHECK(tfs.bsize == 32 && tfs.entries == 4 && tfs_free(&tfs) == 320);
+	ramdisk_init(&disk, mem, sizeof(mem));
+	CHECK(tfs_format(&disk.blk, 0, 0) == 0 && tfs_mount(&tfs, &disk.blk) == 0);
+	CHECK(tfs.bsize == 64 && tfs.entries == 32);
+
 	ee25_init(&ee, &ee_spi, CHIP_SIZE, 256);
 	test_tfs(&ee.blk, 256);
 	test_power_loss(&ee.blk);

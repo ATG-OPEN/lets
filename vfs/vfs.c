@@ -784,7 +784,7 @@ int vfs_mount(const char *dev, const char *path, bool format)
 	bool ok = (fs != NULL && tfs_mount(fs, blk) == 0);
 
 	if (!ok && fs != NULL && format) {
-		ok = tfs_format(blk, TFS_BLOCK_DEFAULT, TFS_ENTRIES_DEFAULT) == 0 &&
+		ok = tfs_format(blk, 0, 0) == 0 &&
 		     tfs_mount(fs, blk) == 0;
 	}
 

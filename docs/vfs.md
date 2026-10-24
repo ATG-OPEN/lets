@@ -90,7 +90,7 @@ touch path              an empty file (a RAM file outside a file system)
 crc path                size and CRC-32, and "ok" / "BAD" against the CRC stored when written
 mount [-f] dev path     -f formats a device without a file system; no arguments: as df
 umount path             refused while a file is open on it
-mkfs dev [block] [n]    block size (default 128) and most files (default 32)
+mkfs dev [block] [n]    block size and most files; by default chosen by the device size
 df                      every mount: size, free bytes
 ```
 
@@ -144,8 +144,9 @@ data              blocks
   the only place where vfs blocks. Write from a task in chunks of one page or less. Writing a
   40 KB image to a 25LC1024 with 256-byte blocks takes about 4,900 page writes (data and FAT),
   roughly 25 s.
-- **Block size**: 128 by default. Use a multiple of the EEPROM page size for big files, and a
-  smaller one for many small files.
+- **Block size**: chosen by the device size unless `mkfs` is given one: 32 bytes below 2 KiB,
+  64 below 16 KiB, else 128; one directory entry per 256 bytes (4 .. 32). Use a multiple of the
+  EEPROM page size for big files, and a smaller one for many small files.
 
 Format parameters are chosen by `mkfs`. The layout is little-endian and byte-by-byte, so an
 image built on a PC matches one built on the MCU.

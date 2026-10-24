@@ -50,8 +50,6 @@
 #include <stdbool.h>
 
 #define TFS_NAME_SIZE	   16u	   /**< File name, including the 0. */
-#define TFS_BLOCK_DEFAULT  128u	   /**< Block size used by `mkfs` and `mount -f`. */
-#define TFS_ENTRIES_DEFAULT 32u	   /**< Directory entries used by `mkfs` and `mount -f`. */
 #define TFS_NONE	   0xFFFFu /**< No block. */
 
 /** tfs_open() modes, OR-ed. */
@@ -107,8 +105,9 @@ typedef struct {
 /**
  * @brief Writes an empty file system over the whole device.
  * @param bsize   Block size: a power of two, 16 .. 4096. A multiple of an
- *                EEPROM's page size makes writes faster.
- * @param entries Most files, 1 .. 255.
+ *                EEPROM's page size makes writes faster. 0: by the device
+ *                size, 32 below 2 KiB, 64 below 16 KiB, else 128.
+ * @param entries Most files, 1 .. 255. 0: one per 256 bytes, 4 .. 32.
  * @return 0, or -1 when the device is too small or an argument is bad.
  */
 int tfs_format(vfs_blk_t *blk, uint16_t bsize, uint8_t entries);

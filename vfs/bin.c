@@ -173,8 +173,16 @@ static int bin_rm(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	if (vfs_remove(argv[1]) < 0) {
+	vfs_path_t p;
+
+	if (vfs_resolve(argv[1], &p) < 0 || p.kind == VFS_NONE) {
 		printf("not found\n");
+		return -1;
+	}
+
+	/* devices, commands and mount points stay; a directory must be empty */
+	if (vfs_remove(argv[1]) < 0) {
+		printf(p.kind == VFS_DIR ? "not empty\n" : "bad argument\n");
 		return -1;
 	}
 
@@ -493,10 +501,10 @@ static int bin_mkfs(void *args, int argc, char *argv[])
 	}
 
 	vfs_blk_t *blk = vfs_blk_get(argv[1]);
-	int bsize = (argc > 2) ? atoi(argv[2]) : (int)TFS_BLOCK_DEFAULT;
-	int entries = (argc > 3) ? atoi(argv[3]) : (int)TFS_ENTRIES_DEFAULT;
+	int bsize = (argc > 2) ? atoi(argv[2]) : 0; /* 0: by the device size */
+	int entries = (argc > 3) ? atoi(argv[3]) : 0;
 
-	if (blk == NULL || entries < 1 || entries > 255) {
+	if (blk == NULL || bsize < 0 || entries < 0 || entries > 255) {
 		return bin_bad();
 	}
 

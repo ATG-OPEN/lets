@@ -254,6 +254,16 @@ static bool tfs_name_ok(const char *name)
 #if !defined(TFS_READONLY)
 int tfs_format(vfs_blk_t *blk, uint16_t bsize, uint8_t entries)
 {
+	if (blk != NULL && bsize == 0) {
+		bsize = (blk->size < 2048u) ? 32u : (blk->size < 16384u) ? 64u : 128u;
+	}
+
+	if (blk != NULL && entries == 0) {
+		uint32_t n = blk->size / 256u;
+
+		entries = (uint8_t)((n < 4u) ? 4u : (n > 32u) ? 32u : n);
+	}
+
 	if (blk == NULL || bsize < 16u || bsize > 4096u || (bsize & (bsize - 1u)) ||
 	    entries == 0) {
 		return -1;
