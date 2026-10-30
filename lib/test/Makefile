@@ -1,7 +1,7 @@
 # Host unit tests for the portable libraries:  make -C lib/test
 CC ?= cc
 CFLAGS ?= -std=c99 -O1 -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined
-TESTS = test_iir test_pulse test_apdbias test_apdcurrent test_spiral
+TESTS = test_iir test_pulse test_apdbias test_apdcurrent test_spiral test_byte8
 
 all: $(TESTS)
 	@for t in $(TESTS); do ./$$t || exit 1; done
@@ -16,6 +16,8 @@ test_apdcurrent: test_apdcurrent.c ../apdcurrent.c ../apdcurrent.h
 	$(CC) $(CFLAGS) -o $@ test_apdcurrent.c ../apdcurrent.c -lm
 test_spiral: test_spiral.c ../spiral.c ../spiral.h
 	$(CC) $(CFLAGS) -o $@ test_spiral.c ../spiral.c -lm
+test_byte8: test_byte8.c ../byte8.c ../byte8.h
+	$(CC) $(CFLAGS) -Dread=test_read -Dwrite=test_write -o $@ test_byte8.c ../byte8.c
 
 clean:
 	rm -f $(TESTS)

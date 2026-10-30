@@ -58,7 +58,7 @@ static uint16_t byte8_crc16_result(void *buffer, size_t length)
 static int byte8_process(uint8_t *buf_raw, unsigned int raw_size, uint8_t *buf_data,
 			 byte8_t *session)
 {
-	for (int i = 0; i < raw_size; i++) {
+	for (int i = 0; i < (int)raw_size; i++) {
 		/* 0xFF always starts a new packet, whatever came before */
 		if (buf_raw[i] == BYTE8_HEADER_SYMBOL) {
 			session->rx_status = BYTE8_WAITING_SIZE;
@@ -138,8 +138,11 @@ int byte8_read(int fd, void *buf, unsigned int size, byte8_t *session)
 
 	/* read more only when the bytes of the last read are used up */
 	if (session->pr_size < 1) {
-		session->pr_size = read(fd, session->pr_buffer + session->rx_pointer,
-					BYTE8_MAX_PACKET_SIZE - session->rx_pointer);
+		int n = read(fd, session->pr_buffer + session->rx_pointer,
+			     BYTE8_MAX_PACKET_SIZE - session->rx_pointer);
+
+		/* -1 is nothing to read too: a stream that doesn't wait, or a closed one */
+		session->pr_size = (n > 0) ? n : 0;
 	}
 
 	int k = byte8_process(session->pr_buffer + session->rx_pointer, session->pr_size,
