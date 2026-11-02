@@ -7,8 +7,12 @@
  *
  * An SPI EEPROM, an SPI SRAM or a buffer in internal RAM all look the same to
  * the file system: read and write any number of bytes at any address. A driver
- * embeds vfs_blk_t as its first member and fills in the two functions; see
- * dev/ee25.h, dev/sram23.h and dev/ramdisk.h.
+ * embeds vfs_blk_t as its first member and fills in the functions; see
+ * dev/ee25.h, dev/sram23.h, dev/ramdisk.h and dev/sst25.h.
+ *
+ * A flash chip has to erase before it writes. Its driver also fills in
+ * discard(): the file system calls it on a block it is about to fill, so the
+ * driver can erase that block once instead of erasing at every small write.
  *
  * vfs_blk_register() makes a device a node in /dev (`/dev/ee0`), where it can
  * be read raw (`cat -x /dev/ee0`), formatted (`mkfs ee0`) and mounted
@@ -28,6 +32,8 @@ struct vfs_blk {
 	int (*read)(vfs_blk_t *blk, uint32_t addr, void *buffer, unsigned int length);
 	/** Writes @p length bytes at @p addr (any alignment); returns 0 or -1. */
 	int (*write)(vfs_blk_t *blk, uint32_t addr, const void *buffer, unsigned int length);
+	/** Optional (NULL): @p length bytes at @p addr are no longer needed; returns 0 or -1. */
+	int (*discard)(vfs_blk_t *blk, uint32_t addr, uint32_t length);
 	uint32_t size; /**< Capacity in bytes. */
 	uint32_t pos;  /**< Position of raw reads / writes through its /dev node. */
 };

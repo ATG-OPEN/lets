@@ -65,7 +65,7 @@ Before a board can run scripts, its firmware has to do two things:
 ```c
 #include "../../lets/argscript/argscript.h"
 
-fsi_register_app("as", argscript_execute);
+vfs_register_app("as", argscript_execute);
 ```
 
 After that, a script can be started in either of two ways:
@@ -480,13 +480,14 @@ int argscript_execute(void *args, int argc, char *argv[]);
 ```
 
 The handler for the `as NODE [NAME]` shell command. Register it under any
-name you like with `fsi_register_app()`.
+name you like with `vfs_register_app()`.
 
 ### Boot scripts
 
-The startup script given to `shell_initialize()` is a plain list of commands,
-each run once. For a boot sequence that needs logic, keep the startup script
-for the basics and start an argscript next to it:
+A board's startup script is `/boot/rc`, run by argscript: `main` calls
+`system("/boot/rc")` after its inits, with `vfs_interpreter_set(argscript_execute)`.
+A plain list of commands is fine, and so is logic. A script kept in flash
+starts the same way with `argscript_start()`:
 
 ```c
 static const char boot[] =
@@ -505,8 +506,8 @@ static const char boot[] =
     "    wait 950\n"
     "end\n";
 
-shell_initialize((void *)startup);
-fsi_register_app("as", argscript_execute);
+shell_initialize();
+vfs_register_app("as", argscript_execute);
 argscript_start("boot", boot);
 tasks_start();
 ```

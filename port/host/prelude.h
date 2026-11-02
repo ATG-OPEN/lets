@@ -28,8 +28,14 @@
 #define close  k_close
 #define lseek  k_lseek
 #define system k_system
+#define printf k_printf
 #define malloc k_malloc
 #define free   k_free
+
+/* the kernel's heap has no calloc / realloc (XC16's would use the linker heap, 0 bytes, and
+ * return NULL): on a PC too they fail, at link time */
+#define calloc	k_calloc_is_not_in_the_kernel
+#define realloc k_realloc_is_not_in_the_kernel
 
 int k_open(const char *pathname, int flags, int mode);
 int k_close(int handle);
@@ -37,6 +43,7 @@ int k_write(int handle, void *buffer, unsigned int len);
 int k_read(int handle, void *buffer, unsigned int len);
 off_t k_lseek(int handle, off_t offset, int whence);
 int k_system(const char *input);
+int k_printf(const char *format, ...);
 void *k_malloc(size_t size);
 void k_free(void *ptr);
 

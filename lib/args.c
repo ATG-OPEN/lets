@@ -3,6 +3,7 @@
 
 #include "args.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -52,61 +53,6 @@ int args_parse(char *input, char *argv[], int max_args)
 	return argc;
 }
 
-int args_combine(char *output, int max_len, int argc, char *argv[])
-{
-	int pos = 0;
-
-	for (int i = 0; i < argc; i++) {
-		char *arg = argv[i];
-		int needs_quote = 0;
-
-		/* a word with a blank in it is quoted */
-		for (char *p = arg; *p != '\0'; p++) {
-			if (*p == ' ' || *p == '\t') {
-				needs_quote = 1;
-				break;
-			}
-		}
-
-		/* one space between words; each step stops when the output is full */
-		if (i > 0) {
-			if (pos + 1 >= max_len) {
-				break;
-			}
-			output[pos++] = ' ';
-		}
-
-		if (needs_quote) {
-			if (pos + 1 >= max_len) {
-				break;
-			}
-			output[pos++] = '"';
-		}
-
-		for (char *p = arg; *p != '\0'; p++) {
-			if (pos + 1 >= max_len) {
-				break;
-			}
-			output[pos++] = *p;
-		}
-
-		if (needs_quote) {
-			if (pos + 1 >= max_len) {
-				break;
-			}
-			output[pos++] = '"';
-		}
-	}
-
-	if (pos < max_len) {
-		output[pos] = '\0';
-	} else {
-		output[max_len - 1] = '\0';
-	}
-
-	return pos;
-}
-
 int args_parse_path(char *input, uint8_t *path, int max_length)
 {
 	int count = 0;
@@ -131,4 +77,72 @@ int args_parse_path(char *input, uint8_t *path, int max_length)
 	}
 
 	return count;
+}
+
+float args_float(const char *text, char **end)
+{
+	const char *p = text;
+	bool minus = false;
+	bool digits = false;
+	float value = 0;
+	float place = 1;
+
+	while (*p == ' ' || *p == '\t') {
+		p++;
+	}
+
+	if (*p == '-' || *p == '+') {
+		minus = (*p++ == '-');
+	}
+
+	for (; *p >= '0' && *p <= '9'; p++, digits = true) {
+		value = value * 10 + (float)(*p - '0');
+	}
+
+	if (*p == '.') {
+		for (p++; *p >= '0' && *p <= '9'; p++, digits = true) {
+			value = value * 10 + (float)(*p - '0');
+			place *= 10;
+		}
+	}
+
+	if (!digits) {
+		if (end != NULL) {
+			*end = (char *)text;
+		}
+
+		return 0;
+	}
+
+	if (*p == 'e' || *p == 'E') {
+		const char *e = p + 1;
+		bool small = (*e == '-');
+		int exponent = 0;
+
+		e += (*e == '-' || *e == '+') ? 1 : 0;
+
+		if (*e >= '0' && *e <= '9') {
+			for (; *e >= '0' && *e <= '9'; e++) {
+				exponent = (exponent < 100) ? exponent * 10 + (*e - '0') : exponent;
+			}
+
+			for (; exponent > 0; exponent--) {
+				if (small) {
+					place *= 10;
+				} else {
+					value *= 10;
+				}
+			}
+
+			p = e;
+		}
+	}
+
+	if (end != NULL) {
+		*end = (char *)p;
+	}
+
+	value /= place;
+
+	return minus ? -value : value;
 }

@@ -4,27 +4,29 @@
 /*
  * The shell: a task that reads command lines from stdin and runs them.
  *
- * Two modes, chosen by `std`:
+ * shell_initialize() starts one on the console, and it goes where `std` points.
+ * The command `shell` starts one on streams of its own, as many as memory allows:
  *
- * - std <node>: a link to a program. Whatever one read() returns is one
- *   command line, run as it is, with no echo and no prompt, so a program
- *   reads only the replies.
- * - std -t <node>: a terminal with a person typing. Keys are collected into
- *   a line and echoed; Enter runs it. Backspace, Ctrl-U (clear the line),
+ *   shell -t < ttyS1 > ttyS1
+ *
+ * Two modes:
+ *
+ * - shell, std <node>: a link to a program. Lines end with '\n' or '\r', so a
+ *   file can be read and a line can come in pieces. One with no end runs when
+ *   the input stops for a moment, as programs that send a line per packet do.
+ *   No echo and no prompt, so a program reads only the replies.
+ * - shell -t, std -t <node>: a terminal with a person typing. Keys are collected
+ *   into a line and echoed; Enter runs it. Backspace, Ctrl-U (clear the line),
  *   Ctrl-C (drop it), Up / Down (earlier lines) and Tab (complete a name:
  *   commands, devices, files in the node table, or the last part of a path)
  *   work as in a PC shell.
  */
 
-#include "../fsi/fsi.h"
+#include "../vfs/vfs.h"
 
 #include "../kernel/task.h"
 
-#include "kill.h"
 #include "shell.h"
-#include "sscript.h"
-#include "tmp.h"
-#include "top.h"
 
 #include <unistd.h>
 #include <string.h>
@@ -39,6 +41,7 @@
 #endif
 
 #define SHELL_PROMPT "> "
+#define SHELL_LINE_WAIT 5 /* polls with no input before a line with no end runs */
 
 /* keys */
 #define KEY_CTRL_C    0x03
@@ -48,24 +51,68 @@
 #define KEY_ESC	      0x1B
 #define KEY_DELETE    0x7F
 
-static char shell_buffer[SHELL_BUFFER_SIZE];
+/*
+ * The echo goes to stderr: the same terminal as stdout, but not line buffered.
+ * It is collected and written once per batch of keys: on a DRN port each write
+ * is a packet, and a burst of one-byte packets overflows the port's queue.
+ */
+#ifndef SHELL_OUT_SIZE
+#define SHELL_OUT_SIZE 64
+#endif
 
-/* the line being typed in terminal mode */
-static struct {
-	unsigned int length; /* characters in shell_buffer */
+typedef struct {
+	char buffer[SHELL_BUFFER_SIZE]; /* the line */
+	unsigned int length; /* characters in buffer */
+	bool started;	     /* it has run */
 	bool prompted;	     /* the prompt for this line is shown */
 	bool last_cr;	     /* the previous key was '\r' (a "\r\n" Enter) */
 	uint8_t escape;	     /* 0, or 1 after ESC, 2 after ESC [ */
+	uint8_t idle;	     /* polls with no input, on a link */
 #if SHELL_HISTORY > 0
 	char (*history)[SHELL_BUFFER_SIZE]; /* [0] is the newest; from the heap, on first use */
 	int recalled;			    /* 0: the line is new, k: history[k - 1] is shown */
 #endif
-} shell;
+	char out[SHELL_OUT_SIZE];
+	unsigned int out_length;
+} shell_t;
 
-/* the echo goes to stderr: the same terminal as stdout, but not line buffered */
+static shell_t shell_console;		   /* the one shell_initialize() starts */
+static shell_t *shell = &shell_console;	   /* the one running */
+static bool shell_console_idle;		   /* it is there, and no console yet */
+
+static void shell_flush(void)
+{
+	if (shell->out_length > 0) {
+		write(2, shell->out, shell->out_length);
+		shell->out_length = 0;
+	}
+}
+
+void shell_write(const void *data, unsigned int length)
+{
+	const char *p = data;
+
+	while (length > 0) {
+		unsigned int n = SHELL_OUT_SIZE - shell->out_length;
+
+		if (n > length) {
+			n = length;
+		}
+
+		memcpy(shell->out + shell->out_length, p, n);
+		shell->out_length += n;
+		p += n;
+		length -= n;
+
+		if (shell->out_length == SHELL_OUT_SIZE) {
+			shell_flush();
+		}
+	}
+}
+
 static void shell_print(const char *text)
 {
-	write(2, (void *)text, strlen(text));
+	shell_write(text, strlen(text));
 }
 
 static void shell_prompt_default(void)
@@ -80,24 +127,26 @@ void shell_prompt_set(void (*prompt)(void))
 	shell_prompt_print = (prompt != NULL) ? prompt : shell_prompt_default;
 }
 
+#ifndef SHELL_NO_TERMINAL
+
 static void shell_prompt(void)
 {
 	shell_prompt_print();
-	shell.prompted = true;
+	shell->prompted = true;
 }
 
-/* replaces what is shown after the prompt with the line in shell_buffer */
+/* replaces what is shown after the prompt with the line in shell->buffer */
 static void shell_redraw(unsigned int shown)
 {
 	shell_print("\r");
 	shell_prompt_print();
-	write(2, shell_buffer, shell.length);
+	shell_write(shell->buffer, shell->length);
 
 	/* blank out what is left of a longer line, then step back */
-	for (unsigned int i = shell.length; i < shown; i++) {
+	for (unsigned int i = shell->length; i < shown; i++) {
 		shell_print(" ");
 	}
-	for (unsigned int i = shell.length; i < shown; i++) {
+	for (unsigned int i = shell->length; i < shown; i++) {
 		shell_print("\b");
 	}
 }
@@ -108,9 +157,9 @@ static void shell_redraw(unsigned int shown)
 /* the name of node @p i as typed, NULL for an unused node */
 static const char *shell_node_name(int i)
 {
-	fsi_node_t *n = fsi_nodes_get() + i;
+	vfs_node_t *n = vfs_nodes_get() + i;
 
-	if (n->used != FSI_NODE_USED || n->handlers == NULL || n->name[0] == '\0') {
+	if (n->handlers == NULL || n->name[0] == '\0') {
 		return NULL;
 	}
 
@@ -125,14 +174,18 @@ static const char *shell_node_name(int i)
 
 void shell_node_names(const char *word, bool command, bool (*candidate)(const char *, bool))
 {
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
+	for (unsigned int i = 0; command && i < vfs_commands_count; i++) {
+		candidate(vfs_commands[i].name, false);
+	}
+
+	for (int i = 0; i < VFS_NODES_MAX; i++) {
 		const char *name = shell_node_name(i);
 
 		if (name == NULL) {
 			continue;
 		}
 
-		if (command && fsi_nodes_get()[i].handlers->execute_handler == NULL) {
+		if (command && vfs_nodes_get()[i].handlers->execute_handler == NULL) {
 			continue; /* the first word is run: only what executes */
 		}
 
@@ -155,7 +208,7 @@ static struct {
 	int matches;	     /* names that match */
 	unsigned int common; /* characters all of them share */
 	bool dir;	     /* the one match is a directory */
-	char first[FSI_NODE_NAME_MAX_LENGTH]; /* the first match */
+	char first[VFS_NODE_NAME_MAX]; /* the first match */
 } shell_tab;
 
 static bool shell_candidate(const char *name, bool dir)
@@ -190,29 +243,29 @@ static bool shell_candidate(const char *name, bool dir)
 static void shell_complete(void)
 {
 	/* the word: from the last space to the end of the line */
-	unsigned int word = shell.length;
+	unsigned int word = shell->length;
 
-	while (word > 0 && shell_buffer[word - 1] != ' ') {
+	while (word > 0 && shell->buffer[word - 1] != ' ') {
 		word--;
 	}
 
 	/* the part to complete: after the last '/' of the word */
-	unsigned int part = shell.length;
+	unsigned int part = shell->length;
 
-	while (part > word && shell_buffer[part - 1] != '/') {
+	while (part > word && shell->buffer[part - 1] != '/') {
 		part--;
 	}
 
-	shell_buffer[shell.length] = '\0';
+	shell->buffer[shell->length] = '\0';
 
 	memset(&shell_tab, 0, sizeof(shell_tab));
-	shell_tab.typed = shell_buffer + part;
-	shell_tab.length = shell.length - part;
+	shell_tab.typed = shell->buffer + part;
+	shell_tab.length = shell->length - part;
 
 	/* the first word, without a path, is a command */
 	bool command = (word == 0 && part == word);
 
-	shell_names(shell_buffer + word, command, shell_candidate);
+	shell_names(shell->buffer + word, command, shell_candidate);
 
 	if (shell_tab.matches == 0) {
 		return;
@@ -223,19 +276,19 @@ static void shell_complete(void)
 		unsigned int add = shell_tab.common - shell_tab.length;
 		const char *rest = shell_tab.first + shell_tab.length;
 
-		if (shell.length + add + 1 >= SHELL_BUFFER_SIZE) {
+		if (shell->length + add + 1 >= SHELL_BUFFER_SIZE) {
 			return;
 		}
 
-		memcpy(shell_buffer + shell.length, rest, add);
-		shell.length += add;
-		write(2, (void *)rest, add);
+		memcpy(shell->buffer + shell->length, rest, add);
+		shell->length += add;
+		shell_write(rest, add);
 
 		if (shell_tab.matches == 1) {
 			char end = shell_tab.dir ? '/' : ' ';
 
-			shell_buffer[shell.length++] = end;
-			write(2, &end, 1);
+			shell->buffer[shell->length++] = end;
+			shell_write(&end, 1);
 		}
 		return;
 	}
@@ -243,7 +296,7 @@ static void shell_complete(void)
 	/* nothing more in common: list the choices, then the line again */
 	shell_print("\r\n");
 	shell_tab.listing = true;
-	shell_names(shell_buffer + word, command, shell_candidate);
+	shell_names(shell->buffer + word, command, shell_candidate);
 	shell_print("\r\n");
 	shell_redraw(0);
 }
@@ -254,36 +307,36 @@ static void shell_complete(void)
 #if SHELL_HISTORY > 0
 static void shell_history_add(void)
 {
-	if (shell.history == NULL || shell.length == 0 ||
-	    strcmp(shell.history[0], shell_buffer) == 0) {
+	if (shell->history == NULL || shell->length == 0 ||
+	    strcmp(shell->history[0], shell->buffer) == 0) {
 		return;
 	}
 
-	memmove(shell.history[1], shell.history[0], (SHELL_HISTORY - 1) * SHELL_BUFFER_SIZE);
-	strcpy(shell.history[0], shell_buffer);
+	memmove(shell->history[1], shell->history[0], (SHELL_HISTORY - 1) * SHELL_BUFFER_SIZE);
+	strcpy(shell->history[0], shell->buffer);
 }
 
 static void shell_history_show(int step)
 {
-	int entry = shell.recalled + step;
+	int entry = shell->recalled + step;
 
-	if (shell.history == NULL || entry < 0 || entry > SHELL_HISTORY) {
+	if (shell->history == NULL || entry < 0 || entry > SHELL_HISTORY) {
 		return;
 	}
 
-	if (entry > 0 && shell.history[entry - 1][0] == '\0') {
+	if (entry > 0 && shell->history[entry - 1][0] == '\0') {
 		return;
 	}
 
-	unsigned int shown = shell.length;
+	unsigned int shown = shell->length;
 
-	shell.recalled = entry;
+	shell->recalled = entry;
 
 	if (entry == 0) {
-		shell.length = 0; /* below the newest entry: an empty line */
+		shell->length = 0; /* below the newest entry: an empty line */
 	} else {
-		strcpy(shell_buffer, shell.history[entry - 1]);
-		shell.length = strlen(shell_buffer);
+		strcpy(shell->buffer, shell->history[entry - 1]);
+		shell->length = strlen(shell->buffer);
 	}
 
 	shell_redraw(shown);
@@ -295,33 +348,35 @@ static void shell_history_show(int step)
 static void shell_enter(void)
 {
 	shell_print("\r\n");
-	shell_buffer[shell.length] = '\0';
+	shell->buffer[shell->length] = '\0';
 
 #if SHELL_HISTORY > 0
 	shell_history_add();
-	shell.recalled = 0;
+	shell->recalled = 0;
 #endif
 
-	unsigned int length = shell.length;
+	unsigned int length = shell->length;
 
-	shell.length = 0;
-	shell.prompted = false;
+	shell->length = 0;
+	shell->prompted = false;
 
+	/* an empty line: the new line and the prompt go out together */
 	if (length > 0) {
-		system(shell_buffer);
+		shell_flush(); /* the line ends before the command's output */
+		system(shell->buffer);
 	}
 }
 
 /* one key typed on the terminal */
 static void shell_key(char c)
 {
-	if (shell.escape == 1) {
-		shell.escape = (c == '[') ? 2 : 0;
+	if (shell->escape == 1) {
+		shell->escape = (c == '[') ? 2 : 0;
 		return;
 	}
 
-	if (shell.escape == 2) {
-		shell.escape = 0;
+	if (shell->escape == 2) {
+		shell->escape = 0;
 #if SHELL_HISTORY > 0
 		if (c == 'A') {
 			shell_history_show(1);
@@ -332,9 +387,9 @@ static void shell_key(char c)
 		return; /* other keys (Left, Right, ...) are ignored */
 	}
 
-	bool after_cr = shell.last_cr;
+	bool after_cr = shell->last_cr;
 
-	shell.last_cr = (c == '\r');
+	shell->last_cr = (c == '\r');
 
 	switch (c) {
 	case '\r':
@@ -347,54 +402,104 @@ static void shell_key(char c)
 		break;
 	case KEY_BACKSPACE:
 	case KEY_DELETE:
-		if (shell.length > 0) {
-			shell.length--;
+		if (shell->length > 0) {
+			shell->length--;
 			shell_print("\b \b");
 		}
 		break;
 	case KEY_CTRL_U: {
-		unsigned int shown = shell.length;
+		unsigned int shown = shell->length;
 
-		shell.length = 0;
+		shell->length = 0;
 		shell_redraw(shown);
 		break;
 	}
 	case KEY_CTRL_C:
 		shell_print("^C\r\n");
-		shell.length = 0;
-		shell.prompted = false;
+		shell->length = 0;
+		shell->prompted = false;
 		break;
 	case KEY_TAB:
 		shell_complete();
 		break;
 	case KEY_ESC:
-		shell.escape = 1;
+		shell->escape = 1;
 		break;
 	default:
-		if ((unsigned char)c >= ' ' && shell.length < SHELL_BUFFER_SIZE - 1) {
-			shell_buffer[shell.length++] = c;
-			write(2, &c, 1);
+		if ((unsigned char)c >= ' ' && shell->length < SHELL_BUFFER_SIZE - 1) {
+			shell->buffer[shell->length++] = c;
+			shell_write(&c, 1);
 		}
 		break;
+	}
+}
+
+#else
+
+void shell_node_names(const char *word, bool command, bool (*candidate)(const char *, bool))
+{
+}
+
+void shell_names_set(shell_names_t names)
+{
+}
+
+#endif /* SHELL_NO_TERMINAL */
+
+/* runs the lines in the buffer; @p all: also what has no line end */
+static void shell_lines(bool all)
+{
+	char *buf = shell->buffer;
+
+	while (shell->length > 0 && !task_stopping()) {
+		unsigned int n = 0;
+
+		while (n < shell->length && buf[n] != '\n' && buf[n] != '\r') {
+			n++;
+		}
+
+		/* a full buffer has to go too: nothing can come after it */
+		if (n == shell->length && !all && shell->length < SHELL_BUFFER_SIZE - 1) {
+			return;
+		}
+
+		buf[n] = '\0';
+
+		if (n > 0) {
+			system(buf);
+		}
+
+		n += (n < shell->length) ? 1u : 0u;
+		shell->length -= n;
+		memmove(buf, buf + n, shell->length);
 	}
 }
 
 /* the shell task: polls stdin every 10 ms */
 int shell_loop(void *args, uint64_t system_time)
 {
-	char *buf = args;
+	if (args != NULL) {
+		shell = args;
+	}
 
-	if (fsi_terminal()) {
+	/* as a login: rc's `cd` is rc's own */
+	if (!shell->started) {
+		shell->started = true;
+		vfs_chdir(VFS_HOME);
+	}
+
+#ifndef SHELL_NO_TERMINAL
+	if (vfs_terminal()) {
 		char keys[16];
 
-		if (!shell.prompted) {
+		if (!shell->prompted) {
 #if SHELL_HISTORY > 0
-			if (shell.history == NULL) {
-				/* only a terminal needs it; owned by the shell task, kept */
-				shell.history = malloc(SHELL_HISTORY * SHELL_BUFFER_SIZE);
+			if (shell->history == NULL) {
+				/* only a terminal needs it; freed with the shell */
+				shell->history = task_alloc(SHELL_HISTORY * SHELL_BUFFER_SIZE);
 
-				if (shell.history != NULL) {
-					memset(shell.history, 0, SHELL_HISTORY * SHELL_BUFFER_SIZE);
+				if (shell->history != NULL) {
+					memset(shell->history, 0, SHELL_HISTORY * SHELL_BUFFER_SIZE);
 				}
 			}
 #endif
@@ -403,79 +508,88 @@ int shell_loop(void *args, uint64_t system_time)
 
 		int size = read(0, keys, sizeof(keys));
 
-		for (int i = 0; i < size; i++) {
+		for (int i = 0; i < size && !task_stopping(); i++) {
 			shell_key(keys[i]);
 
-			if (!shell.prompted && fsi_terminal()) {
+			if (!shell->prompted && vfs_terminal() && !task_stopping()) {
 				shell_prompt(); /* the command is done: the next line */
 			}
 		}
 
+		shell_flush();
+
 		return 10;
 	}
 
-	/* a link to a program: one read is one command line */
-	shell.prompted = false;
+#endif
 
-	int size = read(0, buf, SHELL_BUFFER_SIZE - 1);
+	shell->prompted = false;
 
-	if (size < 1) {
-		return 10;
-	}
-
-	/* drop the line ending: terminals send \r, \n or both */
-	while (size > 0 && (buf[size - 1] == '\n' || buf[size - 1] == '\r')) {
-		size--;
-	}
-
-	buf[size] = '\0';
+	int size = read(0, shell->buffer + shell->length, SHELL_BUFFER_SIZE - 1 - shell->length);
 
 	if (size > 0) {
-		system(buf);
+		shell->length += (unsigned int)size;
+		shell->idle = 0;
+		shell_lines(false);
+	} else if (shell->length > 0 && ++shell->idle >= SHELL_LINE_WAIT) {
+		shell_lines(true);
 	}
 
 	return 10;
 }
 
-/*
- * ls, cat, echo and mv are weak: a project that replaces them (vfs) can leave
- * their files out of the build, and they are then not registered here.
- */
-extern int cat(void *args, int argc, char *argv[]) __attribute__((weak));
-extern int echo(void *args, int argc, char *argv[]) __attribute__((weak));
-extern int ls(void *args, int argc, char *argv[]) __attribute__((weak));
-extern int mv(void *args, int argc, char *argv[]) __attribute__((weak));
-
-int shell_initialize(void *args)
+#ifndef VFS_NO_REDIRECT
+/* shell [-t] < in > out: a shell on these streams, until `kill shell` */
+int shell_start(void *args, int argc, char *argv[])
 {
-	if (cat != NULL) {
-		fsi_register_app("cat", cat);
+	bool terminal = (argc == 2 && strcmp(argv[1], "-t") == 0);
+
+	if (argc > 2 || (argc == 2 && !terminal) || task_streams()->in < 0) {
+		printf("usage: shell [-t] < in > out\n");
+		return -1;
 	}
 
-	if (echo != NULL) {
-		fsi_register_app("echo", echo);
+	shell_t *s = &shell_console;
+
+	/* nobody is on the console: this shell takes over the memory of that one */
+	if (shell_console_idle && vfs_console() < 0) {
+		shell_console_idle = false;
+		task_stop_byname("shell");
+	} else {
+		s = malloc(sizeof(shell_t));
+
+		if (s == NULL) {
+			printf("out of memory\n");
+			return -1;
+		}
 	}
 
-	if (ls != NULL) {
-		fsi_register_app("ls", ls);
+	memset(s, 0, sizeof(shell_t));
+
+	task_t *t = task_create("shell", shell_loop, s);
+
+	if (t == NULL) {
+		if (s != &shell_console) {
+			free(s);
+		}
+
+		printf("out of memory\n");
+		return -1;
 	}
 
-	if (mv != NULL) {
-		fsi_register_app("mv", mv);
-	}
+	t->streams.terminal = terminal ? 1 : 0;
 
-	fsi_register_app("kill", kill);
-	fsi_register_app("top", top);
-	fsi_register_app("touch", tmp_file_create);
-	fsi_register_app("rm", tmp_file_delete);
+	return 0;
+}
+#endif
 
-	task_create("shell", shell_loop, (void *)shell_buffer);
+int shell_initialize(void)
+{
+#ifndef VFS_NO_REDIRECT
+	shell_console_idle = true;
+#endif
 
-	if (args == NULL) {
-		return 0;
-	}
-
-	task_create("startup", sscript, args);
+	task_create("shell", shell_loop, &shell_console);
 
 	return 0;
 }

@@ -11,23 +11,32 @@
  * @brief Registers the built-in commands and starts the shell.
  *
  * The shell is a task that reads command lines from stdin and runs each with
- * system(). Commands: cat, echo, kill, ls, mv, top, touch, rm (plus std and
- * reboot, built into the kernel). cat, echo, ls and mv are optional: a
- * project that leaves bin/cat.c, echo.c, ls.c or mv.c out of its build (vfs
- * has its own) simply does not get them.
+ * system(). Commands: kill, top, touch, rm (plus std, registered by
+ * vfs_initialize(), and reboot, built into system()); vfs_bin_initialize()
+ * adds ls, cat, echo, mv, cd and the other file commands.
  *
- * After `std <node>` one read() is one command line, with no echo: the mode
- * for a program on the other end. After `std -t <node>` it is a terminal for
- * a person (screen, PuTTY): a prompt, echo, Backspace, Ctrl-U, Ctrl-C,
+ * This shell is on the console, where `std` points. The command `shell` starts
+ * more, each on its own streams: `shell -t < ttyS1 > ttyS1`.
+ *
+ * After `std <node>`, or for a `shell`, one read() is one command line, with no
+ * echo: the mode for a program on the other end. After `std -t <node>`, or for a
+ * `shell -t`, it is a terminal for a person (screen, PuTTY): a prompt, echo, Backspace, Ctrl-U, Ctrl-C,
  * Up / Down for the last SHELL_HISTORY lines (default 2, 128 bytes each, taken
  * from the heap when the terminal is first used; -DSHELL_HISTORY=0 for none)
  * and Tab to complete a name.
  *
- * @param args A startup script (lines of commands, 0 terminated) run once by
- *             a "startup" task, or NULL for none.
+ * -DSHELL_NO_TERMINAL leaves the terminal mode out, for a full flash: a program
+ * or the node `sys` (sys.h) gives the commands.
+ *
+ * The board's startup is not the shell's: main() runs it after its inits,
+ * e.g. system("/boot/rc") with argscript as the interpreter.
+ *
  * @return 0.
  */
-int shell_initialize(void *args);
+int shell_initialize(void);
+
+/** @brief The `shell` command: shell [-t] < in > out, a shell on these streams. */
+int shell_start(void *args, int argc, char *argv[]);
 
 /**
  * @brief Replaces the prompt of the terminal mode (default "> ").
@@ -37,6 +46,12 @@ int shell_initialize(void *args);
  * NULL: the default.
  */
 void shell_prompt_set(void (*prompt)(void));
+
+/**
+ * @brief Writes to the terminal with the shell's echo: a prompt uses it, so
+ *        the prompt and the line go out together, in one write.
+ */
+void shell_write(const void *data, unsigned int length);
 
 /**
  * @brief Lists the names Tab may complete a word with.

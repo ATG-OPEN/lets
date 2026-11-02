@@ -39,8 +39,8 @@ task's share.
 
 ## stdout and the shell
 
-Handles 0 / 1 / 2 are stdin / stdout / stderr. `std <node>` points them at a node (a UART, a
-network port); the shell reads its commands from handle 0. `printf` ends up in `write(1, ...)`,
+Handles 0 / 1 / 2 are stdin / stdout / stderr. They go through the running task's streams, and
+`std <node>` points the default at a node (a UART, a network port); the shell reads its commands from handle 0. `printf` ends up in `write(1, ...)`,
 which is line buffered (128 bytes).
 
 ## XC16
@@ -58,6 +58,36 @@ as a node, with non-blocking reads. See `examples/host/main.c` and the `Makefile
 
 ## Another MCU
 
-Nothing in `kernel/`, `fsi/` or `lib/` touches registers. Provide the clock, make sure your
+Nothing in `kernel/`, `vfs/` (but the memory drivers' `vfs_spi_t` and `flash24`) or `lib/` touches registers. Provide the clock, make sure your
 toolchain links the kernel's C-library functions (or rename them as the host build does), and
 write the board's device nodes.
+
+## Watchdog
+
+The scheduler clears the watchdog on every loop; on its own that does nothing. To use it, set the
+fuses so that software can turn it on, with a period longer than the slowest command (an erase of
+a whole flash, say), and start it just before `tasks_start()`:
+
+```c
+#pragma config FWDTEN = ON_SWDTEN       // the names differ between families
+#pragma config WDTPS = PS1024           // about 4 s with FWPSA = PR128
+
+RCONbits.SWDTEN = 1;
+tasks_start();
+```
+
+After it fires, `top mem` shows bit 4 of RCON in `reset`. `home/DEMO.X` does this.
+
+## Limits
+
+LETS must run on 64 KB of program memory and 8 KB of RAM. A board sets what it needs with
+`TASKS_MAX_COUNT`, `MAX_BLOCK_COUNT`, `VFS_NODES_MAX` and `VFS_FDS_MAX`, and `home/UDM.X`
+(PIC24FJ64GP202) is the build to check against. `top mem` shows what a board really uses.
+
+## UART
+
+`opt/tty.c` is the UART of a PIC24F or dsPIC33E as a node, up to 6 ports (`-DTTY_PORTS=n`), sent and
+received by interrupts, with the direction pin of RS485 driven from the interrupt: see `opt/tty.h`.
+It owns its UARTs, so when MCC runs again it must leave them out, or `uartN.c` comes back and defines
+the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`. dsPIC33CK has
+another UART: `home/UDMP.X`, `home/CHARGER.X` and `prj/TIS40K.X` keep MCC's driver.

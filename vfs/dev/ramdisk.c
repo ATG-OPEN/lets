@@ -36,6 +36,7 @@ int ramdisk_init(ramdisk_t *disk, uint8_t *mem, uint32_t size)
 
 	disk->blk.read = ramdisk_read;
 	disk->blk.write = ramdisk_write;
+	disk->blk.discard = NULL;
 	disk->blk.size = size;
 	disk->blk.pos = 0;
 	disk->mem = mem;

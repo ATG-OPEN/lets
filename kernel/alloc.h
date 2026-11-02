@@ -6,8 +6,10 @@
  * @brief Fixed heap with per-task ownership.
  *
  * The kernel provides malloc() and free() itself, from one static buffer.
- * Every block can have an owner (a task): when the task stops, the scheduler
- * frees all blocks it owns, so a finished task can never leak memory.
+ * A block can have an owner (a task): when the task stops, the scheduler frees
+ * all blocks it owns. malloc() gives a block no owner, as what a command makes
+ * usually outlives it; a task owns the argument it was given and what it got
+ * from task_alloc().
  *
  * The heap is declared once in the application:
  * @code
@@ -47,7 +49,9 @@
 extern uint8_t alloc_heap[];	       /**< The heap, from ALLOC_INIT_HEAP(). */
 extern const size_t alloc_heap_length; /**< Its size in bytes. */
 
-#define MAX_BLOCK_COUNT	 64u  /**< Most blocks allocated at the same time. */
+#ifndef MAX_BLOCK_COUNT
+#define MAX_BLOCK_COUNT	 32u  /**< Most blocks allocated at the same time: a project can set its own. */
+#endif
 #define ALLOC_OWNER_NONE (-1) /**< Owner of a block no task owns. */
 
 /** One allocated block. */
@@ -77,9 +81,6 @@ int alloc_free_owner(int owner);
  * @return 0, or -1 when @p ptr is not the start of an allocated block.
  */
 int alloc_change_owner(void *ptr, int newowner);
-
-/** @brief Prints every allocated block (slot, owner, offset, size). */
-void alloc_map(void);
 
 /** @brief Prints a summary: used, free, block count, largest free gap. */
 void alloc_info(void);

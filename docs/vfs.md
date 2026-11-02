@@ -1,14 +1,15 @@
 # vfs: the virtual file system
 
-`vfs` is `fsi` with a directory tree, paths, and real files on SPI EEPROM and SPI SRAM. It runs on
-the same node table as `fsi`. `fsi/fsi.c` and `fsi/fsi.h` are unchanged, and everything written for
-fsi keeps working: drivers, apps, startup scripts, argscripts, `std ttyS1`, `echo x > lcd`.
+`vfs` is the system's node table and the tree over it: every device, command and file is a node,
+reached by its bare name (`ttyS1`) or by a path (`/dev/ttyS1`, `/mnt/ee/config`), with real files
+on SPI EEPROM, SPI SRAM, SPI flash and the PIC24FJ's own flash. (It replaces `fsi`, the flat node
+table it grew from, which is gone.)
 
 ```text
 /
-├── bin/    commands: every node that only executes (fsi_register_app)
-├── dev/    devices: every plain fsi node that can be read or written (ttyS1, led1, ain1, lcd, ee0, ...)
-├── opt/    project applications (vfs_register_app("/opt/trgmon", ...))
+├── bin/    the system's commands: ls, cd, mount, top, std, ed, as, ... (vfs_register_app("ls", ...))
+├── dev/    devices: every plain node that can be read or written (ttyS1, led1, ain1, lcd, ee0, ...)
+├── opt/    every other application: drn-fs, link, trg, pid, ... (vfs_register_app("/opt/trg", ...))
 ├── tmp/    RAM files (touch), or a file system on SPI SRAM / a RAM disk mounted over it
 ├── mnt/    mounted file systems: /mnt/ee on the SPI EEPROM (configs, scripts, firmware images)
 ├── boot/   (a mount) the startup script, rc
@@ -19,34 +20,89 @@ The shell looks and works like a Linux one: the prompt is the working directory 
 in the home), `ls` lists plain names (`ls -p` marks the directories, `ls -l` shows the type and
 `rwx` as Linux does), `cd` alone goes home and `~` is the home in any path.
 
-## fsi or vfs
+## Sources and build options
 
-A project links one of the two:
+| | |
+|-|-|
+| always | `vfs/node.c` (the table), `vfs/vfs.c` (the tree), `vfs/posix.c` (`open`, `read`, `write`, `close`, `lseek`, `system`), `bin/tmp.c` (RAM files) |
+| always too | `vfs/bin.c`: the built-in commands in flash, `ls cat echo rm mv touch cd pwd mkdir cp mount umount df date uptime std kill top shell` (+ `crc mkfs` with tfs), the prompt, Tab on paths; `bin/date.c` the system time |
+| with tfs | `vfs/tfs.c`, `vfs/tfsvfs.c` (tfs as the mount type "tfs"), drivers from `vfs/dev/`, optionally `vfs/ed.c` |
+| a tiny `/boot` | `vfs/onefs.c`: the mount type "one", one file (rc) on a memory too small for tfs |
+| `-DVFS_NO_TFS` | no tfs: for a small MCU with no memory to keep files on. Mounts of other types (the DRN router) still work; `VFS_DIRS_MAX` is 6 |
+| `-DVFS_NODES_MAX=n` | the node table: 24 entries of 22 bytes on a PIC24, for devices, RAM files and commands of a project |
+| `-DVFS_FDS_MAX=n` | handles open at the same time, devices and files: 8 of 10 bytes |
 
-| | fsi | vfs |
-|-|-----|-----|
-| sources | `fsi/fsi.c`, `kernel/posix.c` | `fsi/fsi.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tfs.c`, `vfs/bin.c`, drivers from `vfs/dev/` as needed |
-| names | flat: `ttyS1`, `ls` | the same bare names, plus paths: `/dev/ttyS1`, `/mnt/ee/config` |
-| files | `touch`: 126-byte RAM files | RAM files as well, plus files of any size on a mounted file system |
-| commands | `cat echo kill ls mv rm top touch std reboot` | the same; `ls cat echo rm mv touch` take paths; plus `cd pwd mkdir cp crc mount umount mkfs df`; scripts by name |
+- A node created with `vfs_node_create("ttyS1", ...)` (a bare name) is in `/dev` when it can be
+  read or written (a device keeps its own commands, such as `ttyS1 -b 115200`), else in `/bin`.
+  A command registered with `vfs_register_app("ls", ...)` is in `/bin`, and comes before a
+  built-in of that name.
+- A bare name that isn't in the working directory is looked up among all plain nodes.
+  `open("ttyS1", 0, 0)` works from any directory.
+- `vfs_nodes_get()` returns the table. A node in a vfs directory such as `/opt` or `/tmp` has the
+  directory in the first byte of its name (`0x80 | id`), so its name can be up to 14 characters
+  instead of 15.
+- Directories and mount points are in a table of their own (`VFS_DIRS_MAX` = 8, names up to 11
+  characters, 16 bytes each), and handles in another (`VFS_FDS_MAX`), so neither takes a node.
 
-Compatibility, both ways:
+## Mount types
 
-- A node created with `fsi_node_create()` is in `/dev` (a device keeps its own commands, such as
-  `ttyS1 -b 115200`). A command registered with `fsi_register_app()` is in `/bin`. No code
-  changes.
-- A bare name that isn't in the working directory is looked up among all plain nodes, the same
-  way fsi does it. `open("ttyS1", 0, 0)` works from any directory.
-- Code that walks `fsi_nodes_get()` still sees every node. A node in a vfs directory such as
-  `/opt` or `/tmp` has the directory in the first byte of its name (`0x80 | id`), so its name
-  can be up to 14 characters instead of 15.
-- vfs itself takes no place in the node table (40 entries, fixed by `fsi.h`): directories and
-  mount points are in a table of its own (`VFS_DIRS_MAX` = 8, names up to 11 characters, 16
-  bytes each), and an open file's handle comes after the node table (40 to 43 for
-  `VFS_FILES_MAX` = 4 files open at once).
-- In a vfs project the kernel's `ls`, `cat`, `echo` and `mv` (`bin/ls.c` ...) can be left out of
-  the build, since vfs has its own: `shell_initialize()` references them weakly. That saves
-  about 1.6 KB of flash at -O1.
+A file system is mounted by its type, as on Linux: a `vfs_fs_type_t` (mount, info, dir, open,
+read, write, seek, close, remove, rename, usage, source) registered with `vfs_fs_register()`.
+`vfs_initialize()` registers tfs; other types register themselves, such as the DRN router file
+system (drnfs, in the private drn repository):
+
+```text
+mount -t drn router /drn        the DRN router at /drn: a port is a file, /drn/.N its config
+mount ee0 /mnt/ee               tfs on a block device (-t tfs is the default)
+mount -f sram0 /tmp             tfs, formatted if the device holds none
+df                              Device, Type, Size, Used, Avail, Mounted on
+```
+
+- A name that starts with `.` is hidden: `ls -a` shows it.
+- `std` takes a file of a mounted file system as well as a node (`std /drn/250`: the shell over
+  DRN); the file stays open while it is the standard streams.
+- A read that returns 0 means nothing (yet); a write that returns 0 means not now, try later.
+
+## How every board boots
+
+The same way on every board: the board code registers the memory that holds `/boot` (its own
+program flash, an I2C EEPROM, an SPI flash) as a block device, then `main` does
+
+```c
+vfs_boot("tfs", "flash0");                  // /boot; a board with no rc gets the recovery rc
+shell_initialize();
+vfs_bin_initialize();
+...                                         // the project's other inits and apps
+vfs_register_app("as", argscript_execute);
+vfs_interpreter_set(argscript_execute);
+system("/boot/rc");                         // last, before tasks_start()
+```
+
+`vfs_boot()` mounts the device at `/boot` (formatting one that holds no file system). A board
+with no `/boot/rc` (a new board, or one whose rc was deleted) gets `VFS_BOOT_RC`, the same on
+every board and kept in lets, not in the project:
+
+```text
+ttyS1 -b 9600
+std ttyS1
+```
+
+a console on ttyS1 to write the board's own rc from (`ed /boot/rc ...`). An rc that is there
+stays as it is; it holds all of the board's setup, the shell's port too (`std /drn/250`). If the
+memory does not answer, `vfs_boot()` runs those two lines itself.
+
+`/boot/rc` is run by argscript (`vfs_interpreter_set(argscript_execute)`): the file is read
+whole, and it runs as its own task, so a plain list of commands works and so do `wait`, `if`
+and loops. Without an interpreter set, a script file does not run.
+
+- `"tfs"` for a memory of 1 KiB and more.
+- `"one"` (vfs/onefs.c) for a smaller one: the device holds one file, `rc`, after a 6-byte
+  header (magic, size, CRC-16), so a 256-byte EEPROM keeps a 250-byte rc. The file is edited in
+  RAM and written back at close, header last; if a write is cut, the CRC fails, rc is missing
+  and the board boots its default. Register it first: `vfs_fs_register(&vfs_one_type)`.
+
+The memory's driver belongs to the board (the project's board folder), not to lets: it fills a
+`vfs_blk_t` (blk.h), and anything with that API mounts.
 
 ## Boot
 
@@ -62,23 +118,24 @@ int main(void)
     TMR2_SetInterruptHandler(system_time_callback);
 
     task_initialize(system_time_get);
-    fsi_initialize();
-    vfs_initialize();                           // /opt, /tmp, /mnt
+    vfs_initialize();                           // the node table, /opt, /tmp, /mnt
 
-    board_initialize();                         // device nodes, as with fsi
+    board_initialize();                         // device nodes
     ee25_init(&ee0, &ee_spi, 131072, 256);
     sram23_init(&ram1, &ram_spi, 131072);
     vfs_blk_register("ee0", &ee0.blk);          // /dev/ee0
     vfs_blk_register("ram1", &ram1.blk);        // /dev/ram1
 
-    shell_initialize((void *)startup);
-    vfs_bin_initialize();                       // after the shell: replaces ls, cat, ...
+    shell_initialize();
+    vfs_bin_initialize();                       // after the shell: ls, cat, cd, ...
+    vfs_interpreter_set(argscript_execute);
+    system("/boot/rc");
     tasks_start();
 }
 ```
 
 ```text
-startup script:
+/boot/rc:
     std ttyS1
     mount -f ram1 /tmp          # SRAM is empty after power-up: format it
     mount ee0 /mnt/ee           # the EEPROM keeps its files
@@ -93,8 +150,8 @@ The SPI bus is two functions from the board, `select(bool)` and `exchange(byte)`
 ```text
 ls [-a] [-l] [-p] [path]  -l: type (d directory, - file, c device, b block device), rwx, size
 cd [path]   pwd   mkdir path     cd alone: home (VFS_HOME, /home)
-cat [-x] path           a file to its end; a node with one read, as before
-echo text > path        replace (atomic on a file system); >> appends
+cat [-x] [path]         a file to its end; a node with one read. No path: stdin, with `<`
+echo text               the words, one line
 cp from to              any node or file to any file; `to` may be a directory
 mv from to              rename / move within one file system, or within the node table
 rm path                 a file, a RAM file or an empty directory (devices stay)
@@ -103,7 +160,7 @@ crc path                size and CRC-32, and "ok" / "BAD" against the CRC stored
 mount [-f] dev path     -f formats a device without a file system; no arguments: as df
 umount path             refused while a file is open on it
 mkfs dev [block] [n]    block size and most files; by default chosen by the device size
-df                      every mount: size, free bytes
+df, mount               every mount: device, size, used and free bytes, mount point
 blink                   a script in /home runs by its name, as a task of that name
 /tmp/t   ./x            any other script by its path (a file or a RAM file)
 ```
@@ -111,9 +168,26 @@ blink                   a script in /home runs by its name, as a task of that na
 Scripts are run by the interpreter the project sets, usually argscript:
 
 ```c
-fsi_register_app("as", argscript_execute);
+vfs_register_app("as", argscript_execute);
 vfs_interpreter_set(argscript_execute);     // blink: /home/blink as the task "blink"
 ```
+
+Any command line can be redirected, with `system()` doing the work, so the command never sees it:
+
+```text
+ls -l /home > /tmp/list     stdout to a file or a node: replaces it (atomic on a file system)
+echo text >> log            appends
+cat < /home/blink           stdin from a file or a node
+echo hi>f                   blanks are optional, and `"a > b"` in quotes is text
+blink > log                 what a command starts stays on it, until the last task on it stops
+shell -t < ttyS1 > ttyS1    a shell of its own: see kernel.md
+```
+
+`>` means "not a terminal": lines end in `\n`. `-DVFS_NO_REDIRECT` leaves this and the `shell` command
+out, for a full flash. Differences from Linux are in [linux.md](linux.md).
+
+The node `sys` (bin/sys.c, `sys_initialize()`) is a command line as a file: `echo df > sys` runs the
+line when the file is closed, as a task, and `cat sys` gives what it printed.
 
 `top` shows a running script under its name and `kill blink` stops it. Words after the name are
 not passed to the script.
@@ -133,7 +207,7 @@ close(fd);
 
 Flags: `O_RDONLY`, `O_WRONLY` and `O_RDWR` read and write at the position. `O_CREAT`, `O_EXCL` and
 `O_APPEND` work as in POSIX. `O_TRUNC` writes a new copy that replaces the old file at `close()`.
-Flags `0`, which is how all fsi code opens nodes, behave like an fsi RAM file: reads start at the
+Flags `0`, which is how drivers and apps open nodes, behave like a RAM file: reads start at the
 beginning and writes append. So `echo` and argscript `write` add to a file instead of overwriting
 it.
 
@@ -212,16 +286,15 @@ vfs_mount("nv1", "/home", true);
 - `noload` keeps the pages out of the hex. Program with `ipecmd ... -OP14800-157FF` (in MPLAB X:
   "Preserve Program Memory", range 14800-157ff) so that a firmware update keeps the files.
 
-`home/DEMO.X` (PIC24FJ128GL306) boots this way, and its demo has no C code: it is scripts.
+`home/DEMO.X` (PIC24FJ128GL306) boots this way, and its apps have no C code: they are scripts.
 `apps/nvfs.c` installs them on a new board and leaves existing ones as they are:
 
 ```text
-/boot/rc         console set up in main.c, then: pot scale, a banner, demo, cd
-/home/demo       the launcher: S1 kills the running app and starts the next
+/boot/rc         the network and the shell on it, the pot scale, a banner, cd
 /home/blink      LED1 and LED2 take turns
 /home/rgb        red, green, blue in turn, the pot sets the speed
 /home/knob       the pot in percent on the LCD
-/home/buttons    S1 lights LED1, S2 LED2 (not in the launcher: it uses S1)
+/home/buttons    S1 lights LED1, S2 LED2
 ```
 
 ## Firmware images
@@ -247,19 +320,47 @@ The transport that fills the file is not part of vfs. Any link that can `write()
 do it, for example `cp` from a port, or a protocol task that writes chunks with `O_TRUNC` and
 closes at the end.
 
+## On an SPI flash: sst25
+
+An SST25VF flash (SST25VF016B and compatibles) erases in 4 KiB sectors, and a program only
+clears bits. The `sst25` driver programs a write in place when it only clears bits. Any other
+write rewrites the sector: the driver copies it, changed, to a 4 KiB scratch on another device
+(an SPI SRAM), erases it and programs it back, which takes about 50 ms. A power loss during a
+rewrite loses that sector.
+
+To keep rewrites rare, a block device can have `discard()` (blk.h). tfs calls it on every block
+it allocates, and `mkfs` uses 4 KiB blocks on such a device (64 KiB and more), so each block of
+a file is one sector, erased once when it is taken. Only the sector that holds the directory
+and the FAT is rewritten, about once per file closed and once per two blocks appended.
+
+```c
+static sram23_t ram;
+static part_t scratch, tmp, boot, home;
+static sst25_t sf0;
+
+sram23_init(&ram, &ram_spi, 32768);                     // 23K256
+part_init(&scratch, &ram.blk, 0, SST25_SECTOR);
+part_init(&tmp, &ram.blk, SST25_SECTOR, 32768 - SST25_SECTOR);
+sst25_init(&sf0, &sf_spi, 2097152, &scratch.blk);      // SST25VF016B: id 0xBF2541
+part_init(&boot, &sf0.blk, 0, 65536);                   // partitions pass discard on
+part_init(&home, &sf0.blk, 65536, 2097152 - 65536);
+```
+
+`prj/DIRO6.X` (PIC24FJ256GB412) boots this way, with its shell on USB CDC.
+
 ## Size (XC16 2.10, -O1, PIC24FJ128GL306)
 
 | file | flash | RAM |
 |------|-------|-----|
 | `vfs/tfs.c` | 5.3 KB (3.9 KB with `TFS_READONLY`) | - |
-| `vfs/vfs.c` | 4.9 KB | 150 B (8 directories, 4 open files) |
-| `vfs/posix.c` | 1.5 KB (`kernel/posix.c`: 0.9 KB) | 260 B (the same as kernel/posix.c) |
-| `vfs/bin.c` (15 commands, prompt, Tab) | 4.3 KB, minus 1.6 KB for the kernel commands left out | - |
+| `vfs/vfs.c` | 4.9 KB | 230 B (8 directories, 8 handles) |
+| `vfs/node.c` / `vfs/posix.c` | 0.4 / 1.5 KB | 530 B (24 nodes) / 260 B |
+| `vfs/bin.c` (21 commands, prompt, Tab) | 4.3 KB | - |
 | `vfs/dev/flash24.c` / `part.c` | 1.5 / 0.2 KB | - |
 | `vfs/dev/ee25.c` / `sram23.c` / `ramdisk.c` | 0.7 / 0.45 / 0.2 KB | - |
+| `vfs/dev/sst25.c` | 2.4 KB (DIRO6.X) | - |
 
-Leave out `bin.c` if a project only needs files from C. Build with `-DTFS_NO_CHECK` to drop the
-repair at mount.
+Build with `-DTFS_NO_CHECK` to drop the repair at mount.
 
 ## Tests
 
@@ -268,6 +369,8 @@ emulated 25LC1024 answers byte by byte the way the real one does: it needs WREN,
 inside a page and reports WIP. The emulated 23LC1024 is tested the same way. The test also cuts
 power during a replace, an append and a commit, and checks the whole tree through `system()` and
 `open` / `read` / `write` / `lseek`. flash24 runs against two emulated flash pages that count
-any double word programmed twice (ECC), and the power is cut at every single erase and program
+any double word programmed twice (ECC). An emulated SST25VF flash starts write protected,
+only clears bits when it programs, and counts erases and any command it would ignore (AAI
+misuse, a program without WREN), and the power is cut at every single erase and program
 of a file replacement, checking that the old file or the new one is there each time. `make` also builds `build/lets-vfs-demo`, a shell on your
 terminal with `/tmp` and `/mnt/ee` on RAM disks.

@@ -14,7 +14,16 @@
 int top(void *args, int argc, char *argv[])
 {
 	if (argc == 2 && strcmp(argv[1], "mem") == 0) {
+		size_t peak, size;
+
 		alloc_info();
+
+		if (task_stack(&peak, &size) == 0) {
+			printf("stack %u of %u B\n", (unsigned)peak, (unsigned)size);
+		}
+
+		printf("reset %04X\n", task_reset_cause());
+
 		return 0;
 	}
 
@@ -31,16 +40,16 @@ int top(void *args, int argc, char *argv[])
 	       (unsigned)alloc_free_size(), (unsigned)alloc_heap_size(), (double)loop,
 	       (loop > 0) ? (unsigned)(1000 / loop) : 0u);
 
-	printf("ID\t\tNAME\t\tRAM\t\tDUR\t\tPER\n");
+	printf("ID\t\tNAME\t\tRAM\t\tDUR\t\tMAX\t\tPER\n");
 
 	for (int i = 0; i < TASKS_MAX_COUNT; i++) {
 		if (t[i].state == TASK_UNUSED) {
 			continue;
 		}
 
-		printf("%i\t\t%s\t\t%uB\t\t%.2fms\t\t%.2fms\n", i, t[i].info.name,
-		       (unsigned)alloc_get_owner_size(i), (double)t[i].info.duration,
-		       (double)t[i].info.delay);
+		printf("%i\t\t%s\t\t%uB\t\t%.2fms\t\t%.2fms\t\t%.2fms\n", i, t[i].info.name,
+		       (unsigned)alloc_get_owner_size(i), (double)t[i].info.duration / 1000,
+		       (double)t[i].info.worst / 1000, (double)t[i].info.delay / 1000);
 	}
 
 	return 0;

@@ -10,7 +10,7 @@
 #include "../../kernel/task.h"
 #include "../../kernel/alloc.h"
 #include "../../bin/shell.h"
-#include "../../fsi/fsi.h"
+#include "../../vfs/vfs.h"
 #include "../../vfs/vfs.h"
 #include "../../vfs/dev/ramdisk.h"
 #include "../../port/host/host_tty.h"
@@ -22,7 +22,7 @@ static uint64_t system_time_get(void)
 	return (uint64_t)host_time_us();
 }
 
-static fsi_handler_t tty = {
+static vfs_handler_t tty = {
 	.read_handler = host_tty_read,
 	.write_handler = host_tty_write,
 };
@@ -39,31 +39,31 @@ static int idle(void *args, uint64_t system_time)
 	return 0;
 }
 
-static char startup[] = "std tty\n"
-			"mount -f ram1 /tmp\n"
-			"mkfs ee0\n"
-			"mount ee0 /mnt/ee\n"
-			"echo vfs on the host - try: ls /, ls -l /dev, cd /mnt/ee, df\n";
-
 int main(void)
 {
 	host_tty_setup();
 	setvbuf(stdout, NULL, _IONBF, 0); /* printf and the shell's writes in order */
 
 	task_initialize(system_time_get);
-	fsi_initialize();
 	vfs_initialize();
 
 	/* the board */
-	fsi_node_create("tty", false, NULL, &tty);
+	vfs_node_create("tty", false, NULL, &tty);
 	ramdisk_init(&ee0, ee0_mem, sizeof(ee0_mem));
 	ramdisk_init(&ram1, ram1_mem, sizeof(ram1_mem));
 	vfs_blk_register("ee0", &ee0.blk);
 	vfs_blk_register("ram1", &ram1.blk);
 
-	shell_initialize((void *)startup);
+	shell_initialize();
 	vfs_bin_initialize();
 	task_create("idle", idle, NULL);
+
+	/* the startup, as a board's /boot/rc would do it */
+	system("std tty");
+	system("mount -f ram1 /tmp");
+	system("mkfs ee0");
+	system("mount ee0 /mnt/ee");
+	system("echo vfs on the host - try: ls /, ls -l /dev, cd /mnt/ee, df");
 
 	tasks_start(); /* never returns */
 	return 0;

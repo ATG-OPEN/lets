@@ -28,6 +28,11 @@ task_t *task_get_data(void)
 	return tasks;
 }
 
+bool task_stopping(void)
+{
+	return current >= 0 && tasks[current].state == TASK_STOPPING;
+}
+
 int task_get_current(void)
 {
 	return current;
@@ -67,10 +72,8 @@ static void run_tasks(uint64_t until)
 
 			int r = t->entry(t->arg, now);
 
-			if (r < 0 || t->state == TASK_UNUSED) {
-				if (t->state != TASK_UNUSED) {
-					stop(current);
-				}
+			if (r < 0 || t->state == TASK_STOPPING) {
+				stop(current);
 				continue;
 			}
 
@@ -187,7 +190,11 @@ int t_system(const char *cmd)
 		for (int i = 0; i < (int)TASKS_MAX_COUNT; i++) {
 			if (tasks[i].state != TASK_UNUSED &&
 			    strcmp(tasks[i].info.name, cmd + 5) == 0) {
-				stop(i);
+				if (i == current) {
+					tasks[i].state = TASK_STOPPING;
+				} else {
+					stop(i);
+				}
 				return 0;
 			}
 		}

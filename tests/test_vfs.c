@@ -3,20 +3,23 @@
 
 /*
  * vfs host test: the tiny file system on a RAM disk and on emulated SPI chips (25LC1024 EEPROM,
- * 23LC1024 SRAM, byte by byte as the real ones answer), power loss, and the tree over the fsi
- * table: paths, bare fsi names, /bin, /dev, /opt, /tmp, mounts, open / read / write / lseek and
+ * 23LC1024 SRAM, SST25VF flash, byte by byte as the real ones answer), power loss, and the tree over the node
+ * table: paths, bare names, /bin, /dev, /opt, /tmp, mounts, open / read / write / lseek and
  * the shell commands.
  */
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
 #include "../bin/shell.h"
-#include "../fsi/fsi.h"
+#include "../bin/date.h"
+#include "../lib/args.h"
+#include "../vfs/vfs.h"
 #include "../vfs/vfs.h"
 #include "../vfs/dev/ramdisk.h"
 #include "../vfs/dev/ee25.h"
 #include "../vfs/dev/sram23.h"
 #include "../vfs/dev/flash24.h"
 #include "../vfs/dev/part.h"
+#include "../vfs/dev/sst25.h"
 
 ALLOC_INIT_HEAP(8192);
 
@@ -330,7 +333,7 @@ static int sink_write(void *args, void *buffer, unsigned int length)
 	return (int)length;
 }
 
-static fsi_handler_t sink_node = {.write_handler = sink_write};
+static vfs_handler_t sink_node = {.write_handler = sink_write};
 
 /* a terminal for the shell: read() returns the keys given to type(), the echo goes to screen */
 static const char *keys = "";
@@ -359,9 +362,20 @@ static int term_write(void *args, void *buffer, unsigned int length)
 	return (int)length;
 }
 
-static fsi_handler_t term_node = {.read_handler = term_read, .write_handler = term_write};
+static vfs_handler_t term_node = {.read_handler = term_read, .write_handler = term_write};
 
 int shell_loop(void *args, uint64_t system_time); /* bin/shell.c: the shell task */
+
+static int hold_task(void *arg, uint64_t now)
+{
+	return 1;
+}
+
+/* a command that leaves a task behind */
+static int cmd_hold(void *args, int argc, char *argv[])
+{
+	return (task_create("hold", hold_task, NULL) == NULL) ? -1 : 0;
+}
 
 /* types @p text (then Ctrl-U, so the line is empty again) and returns what was shown */
 static const char *type(const char *text)
@@ -393,6 +407,25 @@ static int cmd_script(void *args, int argc, char *argv[])
 	return 5;
 }
 
+/* runs a script file line by line, at once (argscript would start a task) */
+static int line_script(void *args, int argc, char *argv[])
+{
+	char text[512];
+	int fd = open(argv[1], 0, 0);
+	int n = (fd < 0) ? -1 : read(fd, text, sizeof(text) - 1);
+
+	if (fd >= 0)
+		close(fd);
+	if (n < 0)
+		return -1;
+	text[n] = '\0';
+
+	for (char *line = strtok(text, "\n"); line != NULL; line = strtok(NULL, "\n"))
+		if (line[0] != '#')
+			system(line);
+	return 0;
+}
+
 static int gpio_value;
 
 static int gpio_read(void *args, void *buffer, unsigned int length)
@@ -402,7 +435,7 @@ static int gpio_read(void *args, void *buffer, unsigned int length)
 	return (int)length;
 }
 
-static fsi_handler_t gpio_node = {
+static vfs_handler_t gpio_node = {
 	.read_handler = gpio_read, .write_handler = sink_write, .execute_handler = cmd_probe};
 
 /* true when directory @p path lists @p name */
@@ -458,6 +491,11 @@ static int read_all(const char *path, char *buf, unsigned size)
 	return n;
 }
 
+static int rename_read(void *args, void *buffer, unsigned int length)
+{
+	return 0;
+}
+
 static void test_tree(void)
 {
 	static uint8_t ram0_mem[4096];
@@ -467,23 +505,25 @@ static void test_tree(void)
 	vfs_path_t p;
 	char buf[128];
 
-	fsi_initialize();
 	CHECK(vfs_initialize() == 0);
-	shell_initialize(NULL);
+	shell_initialize();
 	CHECK(vfs_bin_initialize() == 0);
 
-	/* fsi as before: a plain node is in /dev and found by its bare name from anywhere */
-	CHECK(fsi_node_create("ttyS1", false, NULL, &sink_node) == 0);
+	/* a plain node is in /dev and found by its bare name from anywhere */
+	CHECK(vfs_node_create("ttyS1", false, NULL, &sink_node) >= 0);
 	CHECK(vfs_resolve("/dev/ttyS1", &p) == 0 && p.kind == VFS_NODE);
-	int tty = p.node;
-	CHECK(open("ttyS1", 0, 0) == tty && open("/dev/ttyS1", 0, 0) == tty);
+	int tty = open("ttyS1", 0, 0);
+	CHECK(tty > 2 && vfs_fd_node(tty) == vfs_nodes_get() + p.node && close(tty) == 0);
+	tty = open("/dev/ttyS1", 0, 0);
+	CHECK(tty > 2 && close(tty) == 0 && close(tty) == -1);
 	CHECK(open("/bin/ttyS1", 0, 0) == -1);
 	CHECK(system("std ttyS1") == 0);
 
-	/* commands are in /bin: fsi_register_app, the kernel's and the vfs ones */
-	CHECK(fsi_register_app("probe", cmd_probe) == 0);
+	/* commands are in /bin: vfs_register_app, the kernel's and the vfs ones */
+	CHECK(vfs_register_app("probe", cmd_probe) == 0);
+	CHECK(vfs_register_app("hold", cmd_hold) == 0);
 	CHECK(vfs_resolve("/bin/probe", &p) == 0 && p.kind == VFS_NODE);
-	CHECK(vfs_resolve("/bin/ls", &p) == 0 && p.kind == VFS_NODE);
+	CHECK(system("/bin/echo a") == 0); /* a built-in, in flash */
 	CHECK(system("probe a b") == 7 && last_argc == 3);
 	CHECK(system("/bin/probe a") == 7 && last_argc == 2);
 	CHECK(system("ttyS1") == -1 && system("nothing") == -1);
@@ -503,7 +543,9 @@ static void test_tree(void)
 	CHECK(system("cd ../..") == 0 && vfs_cwd() == VFS_ROOT);
 	CHECK(system("cd /nothing") == -1);
 	CHECK(vfs_mkdir("/tmp/logs") == -1 && vfs_mkdir("/bin/x") == -1);
-	CHECK(vfs_resolve("/tmp/../dev/./ttyS1", &p) == 0 && p.node == tty);
+	vfs_path_t tp;
+	CHECK(vfs_resolve("/dev/ttyS1", &tp) == 0 && vfs_resolve("/tmp/../dev/./ttyS1", &p) == 0);
+	CHECK(p.node == tp.node);
 
 	/* RAM files outside a mount: the kernel's touch, now with paths */
 	CHECK(system("touch /tmp/logs/a") == 0);
@@ -545,7 +587,7 @@ static void test_tree(void)
 	CHECK(system("mount ee0 /mnt/ee") == 0);
 	CHECK(system("mount ee0 /mnt/again") == -1);
 	CHECK(system("mkfs ee0") == -1); /* mounted */
-	CHECK(vfs_resolve("/mnt/ee", &p) == 0 && p.kind == VFS_DIR && vfs_mount_get(p.dir));
+	CHECK(vfs_resolve("/mnt/ee", &p) == 0 && p.kind == VFS_DIR && vfs_mount_get(p.dir, NULL));
 
 	/* files by path: echo, cat, cp, the CRC */
 	CHECK(system("echo ram file > /tmp/x") == 0);
@@ -556,6 +598,27 @@ static void test_tree(void)
 	CHECK(strcmp(buf, "line1\nline2\n") == 0);
 	CHECK(system("echo replaced > /mnt/ee/boot.as") == 0);
 	CHECK(read_all("/mnt/ee/boot.as", buf, sizeof(buf)) == 9);
+
+	/* a redirect closes what it opened: this would run out of handles */
+	for (int i = 0; i < 20; i++) {
+		CHECK(system("echo again > /mnt/ee/again") == 0);
+		CHECK(system("cat < /mnt/ee/again > /tmp/again") == 6 && system("rm /tmp/again") == 0);
+	}
+
+	CHECK(system("echo x > /no/such/dir/x") == -1);
+	CHECK(system("echo y > /mnt/ee/a > /no/such/dir/x") == -1);
+
+	/* a task keeps the file open after the command, the last one out closes it */
+	CHECK(system("hold > /mnt/ee/held") == 0);
+
+	int held = task_get_data()[1].streams.out;
+
+	CHECK(vfs_file_is(held) && write(held, "held\n", 5) == 5);
+	CHECK(vfs_file_is(held) && task_stop_byname("hold") == 0 && !vfs_file_is(held));
+	CHECK(read_all("/mnt/ee/held", buf, sizeof(buf)) == 5 && strcmp(buf, "held\n") == 0);
+	CHECK(system("rm /mnt/ee/held") == 0 && system("rm /mnt/ee/again") == 0);
+	system("rm /mnt/ee/a");
+
 	CHECK(system("cd /mnt/ee") == 0 && read_all("boot.as", buf, sizeof(buf)) == 9);
 	CHECK(system("cp boot.as /tmp") == 0 && read_all("/tmp/boot.as", buf, sizeof(buf)) == 9);
 	CHECK(system("crc boot.as") == 0);
@@ -567,7 +630,7 @@ static void test_tree(void)
 	CHECK(system("cd /") == 0);
 
 	/* a device that also takes commands (a GPIO, ttyS1 -b) is in /dev, not /bin */
-	CHECK(fsi_node_create("led1", false, NULL, &gpio_node) == 0);
+	CHECK(vfs_node_create("led1", false, NULL, &gpio_node) > 2);
 	CHECK(dir_has("/dev", "led1") && dir_has("/dev", "ttyS1") && dir_has("/dev", "ee0"));
 	CHECK(!dir_has("/bin", "led1") && !dir_has("/bin", "ttyS1"));
 	CHECK(dir_has("/bin", "probe") && dir_has("/bin", "ls") && !dir_has("/dev", "probe"));
@@ -576,7 +639,7 @@ static void test_tree(void)
 	CHECK(system("/bin/led1 on") == -1);
 
 	/* Tab on a terminal follows the tree */
-	CHECK(fsi_node_create("term", false, NULL, &term_node) == 0);
+	CHECK(vfs_node_create("term", false, NULL, &term_node) > 2);
 	CHECK(system("std -t term") == 0);
 	CHECK(strcmp(type("pro\t"), "/$ probe ") == 0);	     /* a command; the prompt is the directory */
 	CHECK(strcmp(type("/opt/to\t"), "/opt/tool ") == 0); /* a command by path */
@@ -589,7 +652,7 @@ static void test_tree(void)
 	type("cd /tmp/\r"); /* the '/' Tab leaves is fine for cd */
 	CHECK(vfs_dir_path(vfs_cwd(), buf, sizeof(buf)) == 0 && strcmp(buf, "/tmp") == 0);
 	CHECK(strcmp(type("cat bo\t"), "cat boot.as ") == 0); /* the working directory */
-	CHECK(strcmp(type("std tt\t"), "std ttyS1 ") == 0);   /* not here: a bare fsi name */
+	CHECK(strcmp(type("std tt\t"), "std ttyS1 ") == 0);   /* not here: a bare name */
 	const char *s = type("ls ../\t");		      /* the directory one up only */
 	CHECK(strstr(s, "\r\nbin/  dev/  opt/  tmp/  mnt/  \r\n") != NULL);
 	CHECK(strstr(s, "probe") == NULL && strstr(s, "ttyS1") == NULL);
@@ -607,7 +670,7 @@ static void test_tree(void)
 
 	/* a firmware image through open / write / lseek, bigger than a 16-bit int */
 	int fd = open("/mnt/ee/fw.bin", O_WRONLY | O_CREAT | O_TRUNC, 0);
-	CHECK(fd > 2 && vfs_file_get(fd) != NULL);
+	CHECK(fd > 2 && vfs_file_is(fd));
 	uint8_t chunk[128];
 	for (uint32_t i = 0; i < 40000; i += sizeof(chunk)) {
 		for (unsigned k = 0; k < sizeof(chunk); k++)
@@ -636,16 +699,38 @@ static void test_tree(void)
 	CHECK(lseek(fd, 0, 0) == 0);
 	close(fd);
 
-	/* open files are not nodes: handles after the table, all closed now */
-	for (int i = 0; i < FSI_MAX_NODES_COUNT + (int)VFS_FILES_MAX; i++)
-		CHECK(vfs_file_get(i) == NULL);
-	int h[VFS_FILES_MAX + 1];
-	for (unsigned i = 0; i <= VFS_FILES_MAX; i++)
-		h[i] = open("/mnt/ee/rc", 0, 0);
-	CHECK(h[0] == FSI_MAX_NODES_COUNT && h[VFS_FILES_MAX] == -1); /* all in use */
-	for (unsigned i = 0; i < VFS_FILES_MAX; i++)
-		CHECK(close(h[i]) == 0);
+	/* handles, devices and files alike: a table of their own */
+	for (int i = 0; i < VFS_FD_FIRST + (int)VFS_FDS_MAX; i++)
+		CHECK(!vfs_file_is(i));
+	int used = 0;
+	while (used < (int)VFS_FDS_MAX && open("/mnt/ee/rc", 0, 0) >= 0)
+		used++;
+	CHECK(used > 0 && open("/mnt/ee/rc", 0, 0) == -1); /* all in use */
+	for (int i = VFS_FD_FIRST; i < VFS_FD_FIRST + (int)VFS_FDS_MAX; i++)
+		if (vfs_file_is(i))
+			CHECK(close(i) == 0);
 
+	/* read-only is read-only */
+	fd = open("/mnt/ee/rc", O_RDONLY, 0);
+	CHECK(fd > 2 && write(fd, "x", 1) == -1 && close(fd) == 0);
+	fd = open("/mnt/ee/rc", O_WRONLY, 0);
+	CHECK(fd > 2 && read(fd, chunk, 1) == -1 && close(fd) == 0);
+
+	/* a RAM file reads on from where the handle was, each handle for itself */
+	CHECK(system("touch /opt/pos") == 0);
+	fd = open("/opt/pos", O_RDWR, 0);
+	CHECK(write(fd, "abcd", 4) == 4 && read(fd, chunk, 3) == 3 && read(fd, chunk, 3) == 1);
+	CHECK(chunk[0] == 'd' && read(fd, chunk, 3) == 0);
+	CHECK(lseek(fd, 1, 0) == 1 && read(fd, chunk, 1) == 1 && chunk[0] == 'b');
+	int fd9 = open("/opt/pos", O_RDONLY, 0);
+	CHECK(read(fd9, chunk, 1) == 1 && chunk[0] == 'a');
+
+	/* a RAM file that is open stays: its node would go to the next one */
+	CHECK(system("rm /opt/pos") == -1);
+	CHECK(close(fd9) == 0 && system("rm /opt/pos") == -1);
+	CHECK(close(fd) == 0 && system("rm /opt/pos") == 0);
+
+	/* a copy that fails leaves the old file */
 	/* stdout reached the node it was sent to */
 	CHECK(strstr(sink, "replaced") != NULL);
 
@@ -662,30 +747,158 @@ static void test_tree(void)
 	/* scripts run by name from /home, by path from anywhere; the prompt shows ~ there */
 	CHECK(system("mount -f ram0 /home") == 0);
 	CHECK(system("echo echo hi > /home/hello") == 0);
-	CHECK(system("hello") == -1); /* no interpreter yet */
+	CHECK(system("hello") == -1); /* no interpreter set: a script does not run */
+	vfs_interpreter_set(line_script);
+	CHECK(strcmp(capture("hello"), "hi\n") == 0);
+	CHECK(system("echo # a comment > /home/two") == 0 && system("echo echo two >> /home/two") == 0);
+	CHECK(strcmp(capture("/home/two"), "two\n") == 0);
 	vfs_interpreter_set(cmd_script);
 	CHECK(system("hello") == 5 && strcmp(script_path, "/home/hello") == 0);
 	CHECK(strcmp(script_name, "hello") == 0);
 	CHECK(system("/mnt/ee/rc") == 5 && strcmp(script_name, "rc") == 0);
 	CHECK(system("nothing") == -1);
 	CHECK(vfs_resolve("~/hello", &p) == 0 && p.kind == VFS_FILE);
-	CHECK(vfs_resolve("~", &p) == 0 && p.kind == VFS_DIR && vfs_mount_get(p.dir) != NULL);
+	CHECK(vfs_resolve("~", &p) == 0 && p.kind == VFS_DIR && vfs_mount_get(p.dir, NULL) != NULL);
 
-	/* directories, mounts and open files take no node: the table holds only fsi nodes */
+	/* vfs_boot: a new device gets a file system and the recovery rc; an edited rc stays */
+	static uint8_t boot_mem[1020]; /* as a PIC24FJ program flash page */
+	static ramdisk_t boot0;
+	vfs_interpreter_set(line_script);
+	memset(boot_mem, 0x5A, sizeof(boot_mem));
+	CHECK(ramdisk_init(&boot0, boot_mem, sizeof(boot_mem)) == 0 && vfs_blk_register("boot0", &boot0.blk) == 0);
+	CHECK(vfs_boot("tfs", "boot0") == 0);
+	CHECK(read_all("/boot/rc", buf, sizeof(buf)) > 0 && strcmp(buf, VFS_BOOT_RC) == 0);
+	CHECK(system("echo echo edited > /boot/rc") == 0 && system("umount /boot") == 0);
+	CHECK(vfs_boot("tfs", "boot0") == 0 && strcmp(capture("/boot/rc"), "edited\n") == 0);
+	CHECK(system("umount /boot") == 0 && vfs_boot("tfs", "nothing") == -1);
+
+	/* "one": a 256-byte EEPROM holding rc only, as on UDM */
+	static uint8_t ee_mem[256];
+	static ramdisk_t ee256;
+	const char *rc100 = "ttyS1 -b 9600\nnmac ttyS1 PRES HOST\nstd nmac\nmv di0 SLDO\nmv di1 SLDU\n"
+			    "led -o -1 0.5 1 0.5 0\n";
+	memset(ee_mem, 0xFF, sizeof(ee_mem));
+	CHECK(ramdisk_init(&ee256, ee_mem, sizeof(ee_mem)) == 0 && vfs_blk_register("ee256", &ee256.blk) == 0);
+	CHECK(vfs_fs_register(&vfs_one_type) == 0);
+	CHECK(vfs_boot("one", "ee256") == 0 && read_all("/boot/rc", buf, sizeof(buf)) > 0 && strcmp(buf, VFS_BOOT_RC) == 0);
+	CHECK(system("echo echo one > /boot/rc") == 0 && strcmp(capture("/boot/rc"), "one\n") == 0);
+	CHECK(strcmp(capture("ls /boot"), "rc\n") == 0 && system("touch /boot/other") == -1);
+	CHECK(system("echo echo two >> /boot/rc") == 0 && strcmp(capture("/boot/rc"), "one\ntwo\n") == 0);
+	CHECK(system("echo echo three > /boot/rc") == 0 && strcmp(capture("/boot/rc"), "three\n") == 0);
+	vfs_info_t info;
+	/* a device renamed by a bare name stays a device: found from anywhere */
+	static vfs_handler_t rename_node = {.read_handler = rename_read};
+	vfs_path_t rp;
+	CHECK(vfs_node_create("/dev/dn0", false, NULL, &rename_node) >= 0);
+	CHECK(vfs_chdir("/") == 0 && system("mv dn0 dn1") == 0);
+	CHECK(vfs_chdir("/mnt/ee") == 0 && vfs_resolve("dn1", &rp) == 0 && rp.kind == VFS_NODE);
+	CHECK(vfs_resolve("/dev/dn1", &rp) == 0 && rp.kind == VFS_NODE);
+	CHECK(vfs_chdir("/") == 0);
+
+	/* a transfer given up leaves the old file, and no new one */
+	int afd = open("/mnt/ee/keep", O_WRONLY | O_CREAT | O_TRUNC, 0);
+	CHECK(write(afd, "old", 3) == 3);
+	CHECK(close(afd) == 0);
+	afd = open("/mnt/ee/keep", O_WRONLY | O_CREAT | O_TRUNC, 0);
+	CHECK(write(afd, "new data", 8) == 8);
+	CHECK(vfs_file_abort(afd) == 0);
+	char ab[16];
+	afd = open("/mnt/ee/keep", O_RDONLY, 0);
+	CHECK(read(afd, ab, sizeof(ab)) == 3 && memcmp(ab, "old", 3) == 0);
+	close(afd);
+	afd = open("/mnt/ee/never", O_WRONLY | O_CREAT | O_TRUNC, 0);
+	CHECK(write(afd, "x", 1) == 1);
+	CHECK(vfs_file_abort(afd) == 0);
+	CHECK(open("/mnt/ee/never", O_RDONLY, 0) < 0);
+	vfs_remove("/mnt/ee/keep");
+
+	/* the same on "one": the device is written at close, so rc stays */
+	char rc_before[128];
+	int rc_size = read_all("/boot/rc", rc_before, sizeof(rc_before));
+	int ofd = open("/boot/rc", O_WRONLY | O_TRUNC, 0);
+	CHECK(write(ofd, "half", 4) == 4);
+	CHECK(vfs_file_abort(ofd) == 0);
+	CHECK(read_all("/boot/rc", buf, sizeof(buf)) == rc_size && strcmp(buf, rc_before) == 0);
+
+	int efd = open("/boot/rc", O_WRONLY | O_TRUNC, 0);
+	CHECK(efd >= 0 && write(efd, (void *)rc100, strlen(rc100)) == (int)strlen(rc100) && close(efd) == 0);
+	CHECK(vfs_resolve("/boot/rc", &p) == 0 && vfs_file_info(&p, &info) == 0 && info.size == strlen(rc100));
+	char big[300];
+	memset(big, 'x', sizeof(big));
+	efd = open("/boot/rc", O_WRONLY | O_TRUNC, 0);
+	CHECK(efd >= 0 && write(efd, big, sizeof(big)) == 250 && write(efd, big, 1) == -1 && close(efd) == 0);
+	CHECK(vfs_resolve("/boot/rc", &p) == 0 && vfs_file_info(&p, &info) == 0 && info.size == 250);
+	/* a byte lost (a power cut while writing): rc is missing, the recovery rc comes back */
+	ee_mem[100] ^= 1;
+	CHECK(system("umount /boot") == 0 && vfs_boot("one", "ee256") == 0);
+	CHECK(read_all("/boot/rc", buf, sizeof(buf)) > 0 && strcmp(buf, VFS_BOOT_RC) == 0);
+	CHECK(system("rm /boot/rc") == 0 && vfs_resolve("/boot/rc", &p) == 0 && p.kind == VFS_NONE);
+	CHECK(system("umount /boot") == 0);
+
+	/* directories, mounts and open files take no node: the table holds only nodes */
 	int nodes = 0;
-	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
-		nodes += fsi_nodes_get()[i].used == FSI_NODE_USED;
+	for (int i = 0; i < VFS_NODES_MAX; i++)
+		nodes += vfs_nodes_get()[i].handlers != NULL;
 	int fd2 = open("~/hello", 0, 0);
-	CHECK(fd2 >= FSI_MAX_NODES_COUNT && vfs_mkdir("/opt/d1") == 0 && vfs_mkdir("/opt/d1/d2") == 0);
+	CHECK(fd2 > 2 && vfs_mkdir("/opt/d1") == 0 && vfs_mkdir("/opt/d1/d2") == 0);
 	int now = 0;
-	for (int i = 0; i < FSI_MAX_NODES_COUNT; i++)
-		now += fsi_nodes_get()[i].used == FSI_NODE_USED;
+	for (int i = 0; i < VFS_NODES_MAX; i++)
+		now += vfs_nodes_get()[i].handlers != NULL;
 	CHECK(now == nodes && close(fd2) == 0);
 	CHECK(vfs_rename("/opt/d1/d2", "/opt/d3") == 0 && vfs_rename("/opt/d1", "/opt/d1/x") == -1);
 	CHECK(vfs_remove("/opt/d1") == 0 && vfs_remove("/opt/d3") == 0);
 
+	/* numbers without strtod */
+	{
+		char *end;
+
+		CHECK(args_float("0.000244", &end) > 0.000243f && args_float("0.000244", NULL) < 0.000245f);
+		CHECK(*end == '\0' && args_float(" -2.5x", &end) == -2.5f && *end == 'x');
+		CHECK(args_float("+7", NULL) == 7 && args_float(".5", NULL) == 0.5f);
+		CHECK(args_float("5.", NULL) == 5 && args_float("1e3", NULL) == 1000);
+		CHECK(args_float("15e-1", NULL) == 1.5f);
+		CHECK(args_float("2e", &end) == 2 && *end == 'e');
+		const char *none = "abc";
+		CHECK(args_float(none, &end) == 0 && end == none);
+		CHECK(args_float("-", &end) == 0 && *end == '-');
+	}
+
+	/* system time */
+	{
+		char text[20];
+		uint32_t t;
+
+		date_format(0, text);
+		CHECK(strcmp(text, "1970-01-01 00:00:00") == 0);
+		date_format(1709164800ul, text); /* a leap day */
+		CHECK(strcmp(text, "2024-02-29 00:00:00") == 0);
+		date_format(4102444799ul, text);
+		CHECK(strcmp(text, "2099-12-31 23:59:59") == 0);
+		CHECK(date_parse("2024-02-29 00:00:00", &t) == 0 && t == 1709164800ul);
+		CHECK(date_parse("2099-12-31 23:59:59\n", &t) == 0 && t == 4102444799ul);
+		CHECK(date_parse("1970-01-01", &t) == 0 && t == 0);
+		CHECK(date_parse("@1793534400", &t) == 0 && t == 1793534400ul);
+		CHECK(date_parse("2026-13-01", &t) == -1 && date_parse("2026-11-01 25:00:00", &t) == -1);
+		CHECK(date_parse("yesterday", &t) == -1 && date_parse("2026-11", &t) == -1);
+
+		for (uint32_t s = 0; s < 4000000000ul; s += 86399ul * 37ul) {
+			date_format(s, text);
+			CHECK(date_parse(text, &t) == 0 && t == s);
+		}
+
+		CHECK(!date_is_set() && strstr(capture("date"), "(not set)") != NULL);
+		CHECK(system("date -s \"2026-11-01 12:00:00\"") == 0 && date_is_set());
+		CHECK(strncmp(capture("date"), "2026-11-01 12:00:0", 18) == 0);
+		CHECK(system("date -s nonsense") == -1 && system("date x") == -1);
+		CHECK(system("echo 2030-01-02 03:04:05 > /dev/date") == 0);
+		int dfd = open("/dev/date", O_RDONLY, 0);
+		CHECK(read(dfd, buf, 20) == 20 && close(dfd) == 0);
+		CHECK(strncmp(buf, "2030-01-02 03:04:0", 18) == 0 && buf[19] == '\n');
+		CHECK(strncmp(capture("uptime"), "up 0 days 00:", 13) == 0);
+	}
+
 	/* ed: one line per command */
-	CHECK(fsi_register_app("ed", vfs_ed) == 0);
+	CHECK(vfs_register_app("ed", vfs_ed) == 0);
 	CHECK(system("ed ~/new 0a put led1 1") == 0);		 /* a new file */
 	CHECK(system("ed ~/new 1a wait 500") == 0);		 /* after line 1 */
 	CHECK(system("ed ~/new 2a put led1 0") == 0);		 /* at the end */
@@ -699,6 +912,28 @@ static void test_tree(void)
 	CHECK(system("ed ~/new 9c x") == -1 && system("ed ~/new 0d") == -1);
 	CHECK(system("ed ~/new 2x y") == -1 && system("ed ~/new 1d extra") == -1);
 	CHECK(system("ed ~/nothing") == -1 && system("ed ttyS1 1d") == -1);
+
+	/* a copy or an edit that fails on a full file system leaves what was there */
+	{
+		static uint8_t full_mem[1024];
+		static ramdisk_t full;
+		static char fill[300];
+
+		CHECK(ramdisk_init(&full, full_mem, sizeof(full_mem)) == 0);
+		CHECK(vfs_blk_register("full", &full.blk) == 0);
+		CHECK(system("mkfs full 64 6") == 0 && system("mount full /mnt/full") == 0);
+		CHECK(system("echo good > /mnt/full/rc") == 0);
+		memset(fill, 'x', sizeof(fill));
+		int ff = open("/mnt/full/big", O_WRONLY | O_CREAT | O_TRUNC, 0);
+		CHECK(write(ff, fill, sizeof(fill)) == sizeof(fill) && close(ff) == 0);
+		ff = open("/mnt/full/fill", O_WRONLY | O_CREAT | O_TRUNC, 0);
+		while (write(ff, fill, 64) > 0) {
+		}
+		CHECK(close(ff) == 0);
+		CHECK(system("cp /mnt/full/big /mnt/full/rc") == -1);
+		CHECK(read_all("/mnt/full/rc", buf, sizeof(buf)) == 5 && strcmp(buf, "good\n") == 0);
+		CHECK(system("umount /mnt/full") == 0);
+	}
 	CHECK(system("echo last > ~/nonl") == 0 && system("ed ~/nonl 1a after") == 0);
 	CHECK(read_all("~/nonl", buf, sizeof(buf)) > 0 && strcmp(buf, "last\nafter\n") == 0);
 	CHECK(system("ed ~/new 3d") == 0 && system("ed ~/new 2d") == 0 && system("ed ~/new 1d") == 0);
@@ -822,6 +1057,187 @@ static void test_flash24(void)
 	CHECK(nv.blk.write(&nv.blk, 2040, "wxyz", 4) == 0 && nv.blk.write(&nv.blk, 2043, "12", 2) == -1);
 }
 
+/* -------------------------------------------------------------------------- */
+/* an SST25VF flash, emulated: protected at power-up, programming only clears bits, AAI */
+
+#define SF_SIZE 262144u
+
+static struct {
+	uint8_t mem[SF_SIZE];
+	bool protect, wel, aai, ewsr;
+	int busy, count;
+	uint8_t cmd;
+	uint32_t addr;
+	unsigned erases, misuse; /* misuse: a command the chip would ignore or a bad AAI */
+} sf_chip = {.protect = true};
+
+static void sf_select(bool on)
+{
+	if (!on && sf_chip.count > 0) {
+		uint8_t c = sf_chip.cmd;
+
+		if (c == 0x20 && sf_chip.count == 4) {
+			if (sf_chip.wel && !sf_chip.protect) {
+				memset(sf_chip.mem + (sf_chip.addr & ~4095u) % SF_SIZE, 0xFF, 4096);
+				sf_chip.erases++;
+				sf_chip.busy = 3;
+			} else {
+				sf_chip.misuse++;
+			}
+			sf_chip.wel = false;
+		}
+		if (c == 0x02) {
+			sf_chip.wel = false;
+			sf_chip.busy = 1;
+		}
+		if (c == 0xAD) {
+			sf_chip.busy = 1;
+		}
+		if (c == 0x01) {
+			sf_chip.ewsr = false;
+		}
+	}
+	sf_chip.count = 0;
+}
+
+static uint8_t sf_exchange(uint8_t b)
+{
+	int n = sf_chip.count++;
+
+	if (n == 0) {
+		sf_chip.cmd = b;
+		if (sf_chip.aai && b != 0xAD && b != 0x05 && b != 0x04) {
+			sf_chip.misuse++;
+		}
+		if (b == 0x06) {
+			sf_chip.wel = true;
+		} else if (b == 0x04) {
+			sf_chip.wel = false;
+			sf_chip.aai = false;
+		} else if (b == 0x50) {
+			sf_chip.ewsr = true;
+		} else if (b == 0xAD && sf_chip.aai) {
+			sf_chip.count = 4; /* AAI goes on: data only */
+			if (sf_chip.busy > 0) {
+				sf_chip.misuse++;
+			}
+		} else if (b != 0x05 && sf_chip.busy > 0) {
+			sf_chip.misuse++;
+		}
+		return 0xFF;
+	}
+
+	switch (sf_chip.cmd) {
+	case 0x05:
+		if (sf_chip.busy > 0) {
+			sf_chip.busy--;
+			return 0x01;
+		}
+		return (uint8_t)((sf_chip.protect ? 0x1C : 0) | (sf_chip.wel ? 0x02 : 0) | (sf_chip.aai ? 0x40 : 0));
+	case 0x9F:
+		return n == 1 ? 0xBF : n == 2 ? 0x25 : 0x41;
+	case 0x01:
+		if (sf_chip.ewsr || sf_chip.wel) {
+			sf_chip.protect = (b & 0x1C) != 0;
+		}
+		return 0xFF;
+	}
+
+	if (n <= 3) {
+		sf_chip.addr = (sf_chip.addr << 8 | b) & 0xFFFFFF;
+		if (n == 1) {
+			sf_chip.addr = b;
+		}
+		return 0xFF;
+	}
+
+	uint32_t a = sf_chip.addr % SF_SIZE;
+
+	switch (sf_chip.cmd) {
+	case 0x03:
+		sf_chip.addr++;
+		return sf_chip.mem[a];
+	case 0x02:
+		if (n == 4 && sf_chip.wel && !sf_chip.protect) {
+			sf_chip.mem[a] &= b;
+		} else {
+			sf_chip.misuse++;
+		}
+		return 0xFF;
+	case 0xAD:
+		if (n == 4 && !sf_chip.aai) {
+			if (!sf_chip.wel || sf_chip.protect || (a & 1u)) {
+				sf_chip.misuse++;
+			}
+			sf_chip.aai = true;
+		}
+		sf_chip.mem[a] &= b;
+		sf_chip.addr++;
+		return 0xFF;
+	}
+
+	return 0xFF;
+}
+
+static const vfs_spi_t sf_spi = {sf_select, sf_exchange};
+
+static void test_sst25(void)
+{
+	static uint8_t scratch_mem[4096];
+	static uint8_t pattern_buf[4096 + 100];
+	ramdisk_t scratch;
+	sst25_t sf;
+	uint8_t buf[64];
+
+	memset(sf_chip.mem, 0x5A, sizeof(sf_chip.mem)); /* old contents */
+	ramdisk_init(&scratch, scratch_mem, sizeof(scratch_mem));
+	CHECK(sst25_init(&sf, &sf_spi, SF_SIZE, &scratch.blk) == 0);
+	CHECK(sf.id == 0xBF2541ul && !sf_chip.protect);
+
+	/* across a sector boundary, over old data: rewrites; then only bits cleared: in place */
+	for (unsigned i = 0; i < sizeof(pattern_buf); i++)
+		pattern_buf[i] = pattern(i);
+	CHECK(sf.blk.write(&sf.blk, 4000, pattern_buf, sizeof(pattern_buf)) == 0);
+	CHECK(sf.erases == 3 && sf_chip.erases == 3);
+	CHECK(memcmp(sf_chip.mem + 4000, pattern_buf, sizeof(pattern_buf)) == 0);
+	CHECK(sf_chip.mem[3999] == 0x5A && sf_chip.mem[4000 + sizeof(pattern_buf)] == 0x5A);
+	CHECK(sf.blk.write(&sf.blk, 4001, "\x00", 1) == 0 && sf_chip.erases == 3 && sf_chip.mem[4001] == 0);
+	CHECK(sf.blk.read(&sf.blk, 3998, buf, 4) == 0 && buf[0] == 0x5A && buf[2] == pattern(0) && buf[3] == 0);
+	CHECK(sf.blk.write(&sf.blk, SF_SIZE - 2, "ab", 3) == -1);
+
+	/* discard: whole sectors only, erased ones are left alone */
+	CHECK(sf.blk.discard(&sf.blk, 100, 8192) == 0 && sf_chip.erases == 4);
+	CHECK(sf_chip.mem[4096] == 0xFF && sf_chip.mem[4095] != 0xFF && sf_chip.mem[8192] == pattern(8192 - 4000));
+	CHECK(sf.blk.discard(&sf.blk, 4096, 4096) == 0 && sf_chip.erases == 4);
+
+	/* the file system: format erases the directory sector, a block is erased once */
+	test_tfs(&sf.blk, 4096);
+	CHECK(tfs_format(&sf.blk, 0, 0) == 0);
+	tfs_t fs;
+	CHECK(tfs_mount(&fs, &sf.blk) == 0 && fs.bsize == 4096);
+	unsigned before = sf_chip.erases;
+	CHECK(fill_file(&fs, "fw.bin", 20000, TFS_WRITE | TFS_CREATE | TFS_TRUNC) == 0);
+	CHECK(check_file(&fs, "fw.bin", 20000));
+	CHECK(sf_chip.erases - before <= 5 + 8);
+	/* a replacement: 5 blocks, the rest the directory sector (a link over the end mark
+	 * 0xFFFE to an odd block sets a bit, the entry, the commit) */
+	before = sf_chip.erases;
+	CHECK(fill_file(&fs, "fw.bin", 20000, TFS_WRITE | TFS_CREATE | TFS_TRUNC) == 0);
+	CHECK(check_file(&fs, "fw.bin", 20000));
+	printf("vfs: SST25VF erases for a 20 KB file replaced: %u\n", sf_chip.erases - before);
+	CHECK(sf_chip.erases - before <= 5 + 8);
+	test_power_loss(&sf.blk);
+	CHECK(sf_chip.misuse == 0);
+
+	/* partitions pass discard on; no chip: init fails */
+	part_t part;
+	CHECK(part_init(&part, &sf.blk, 65536, 65536) == 0 && part.blk.discard != NULL);
+	memset(sf_chip.mem + 65536, 0, 4096);
+	CHECK(part.blk.discard(&part.blk, 0, 4096) == 0 && sf_chip.mem[65536] == 0xFF);
+	CHECK(tfs_format(&part.blk, 0, 0) == 0 && tfs_mount(&fs, &part.blk) == 0 && fs.bsize == 4096);
+	CHECK(sst25_init(&sf, &ram_spi, SF_SIZE, &scratch.blk) == -1 || sf.id != 0xBF2541ul);
+}
+
 int main(void)
 {
 	static uint8_t mem[8192];
@@ -852,6 +1268,7 @@ int main(void)
 	test_tfs(&ram.blk, 128);
 
 	test_flash24();
+	test_sst25();
 	test_tree();
 
 	fprintf(stderr, "vfs: %s\n", failures ? "FAILED" : "ok");

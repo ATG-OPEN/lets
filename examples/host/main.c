@@ -11,7 +11,7 @@
 #include "../../kernel/task.h"
 #include "../../kernel/alloc.h"
 #include "../../bin/shell.h"
-#include "../../fsi/fsi.h"
+#include "../../vfs/vfs.h"
 #include "../../port/host/host_tty.h"
 
 ALLOC_INIT_HEAP(16384);
@@ -21,7 +21,7 @@ static uint64_t system_time_get(void)
 	return (uint64_t)host_time_us();
 }
 
-static fsi_handler_t tty = {
+static vfs_handler_t tty = {
 	.read_handler = host_tty_read,
 	.write_handler = host_tty_write,
 };
@@ -35,18 +35,20 @@ static int idle(void *args, uint64_t system_time)
 	return 0;
 }
 
-static char startup[] = "std tty\n"
-			"echo kernel running on the host - try: ls, top, echo hi, touch f, cat f\n";
-
 int main(void)
 {
 	host_tty_setup();
 
 	task_initialize(system_time_get);
-	fsi_initialize();
-	fsi_node_create("tty", false, NULL, &tty); /* the board's only device */
-	shell_initialize((void *)startup);
+	vfs_initialize();
+	vfs_node_create("tty", false, NULL, &tty); /* the board's only device */
+	shell_initialize();
+	vfs_bin_initialize();
 	task_create("idle", idle, NULL);
+
+	/* the startup, as a board's /boot/rc would do it */
+	system("std tty");
+	system("echo kernel running on the host - try: ls, top, echo hi, touch f, cat f");
 
 	tasks_start(); /* never returns */
 	return 0;

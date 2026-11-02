@@ -20,6 +20,8 @@
 #include "argscript.h"
 
 #include "../kernel/task.h"
+#include "../lib/args.h"
+#include "../vfs/vfs.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -145,7 +147,7 @@ static bool as_number(const char *t, float *v)
 {
 	char *e;
 
-	*v = (float)strtod(t, &e);
+	*v = args_float(t, &e);
 
 	return e != t && *as_rest(e) == '\0';
 }
@@ -386,7 +388,7 @@ static int as_set(as_state_t *s, char *p)
 
 	/* number op number is math, anything else is text */
 	char *e;
-	float a = (float)strtod(p, &e);
+	float a = args_float(p, &e);
 	char *o = as_rest(e);
 	char op = o[0];
 
@@ -511,7 +513,8 @@ static int as_io(as_state_t *s, char kind, char *p)
 		}
 	}
 
-	int fd = open(node, 0, 0);
+	int fd = open(node, (kind == 'r' || kind == 'g') ? O_RDONLY :
+			    (kind == 'p') ? O_WRONLY : (O_WRONLY | O_APPEND), 0);
 
 	if (fd < 0) {
 		s->result = -1;
@@ -537,7 +540,7 @@ static int as_io(as_state_t *s, char kind, char *p)
 			as_var_number(v, f);
 		}
 	} else if (kind == 'p') {
-		f = (float)atof(as_word(&p));
+		f = args_float(as_word(&p), NULL);
 		s->result = write(fd, &f, sizeof(f));
 	} else {
 		/* decode \n in place, the text only gets shorter */
@@ -646,10 +649,8 @@ static int as_step(as_state_t *s)
 	if (k == AS_K_COUNT) {
 		int r = system(as_line);
 
-		/* the command may have killed this script, s is gone then */
-		task_t *t = task_get_data() + task_get_current();
-
-		if (t->state == TASK_UNUSED) {
+		/* the command may have stopped this script */
+		if (task_stopping()) {
 			return -1;
 		}
 

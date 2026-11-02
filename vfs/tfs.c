@@ -127,6 +127,12 @@ static uint16_t tfs_alloc(tfs_t *fs)
 			continue;
 		}
 
+		/* its old contents are garbage: a flash erases it now, once */
+		if (fs->blk->discard != NULL &&
+		    fs->blk->discard(fs->blk, fs->data + ((uint32_t)b << fs->bshift), fs->bsize) < 0) {
+			return TFS_NONE;
+		}
+
 		if (tfs_fat_set(fs, b, TFS_END) < 0) {
 			return TFS_NONE;
 		}
@@ -256,6 +262,11 @@ int tfs_format(vfs_blk_t *blk, uint16_t bsize, uint8_t entries)
 {
 	if (blk != NULL && bsize == 0) {
 		bsize = (blk->size < 2048u) ? 32u : (blk->size < 16384u) ? 64u : 128u;
+
+		/* a flash of 64 KiB and more: a block is an erase sector */
+		if (blk->discard != NULL && blk->size >= 65536ul) {
+			bsize = 4096u;
+		}
 	}
 
 	if (blk != NULL && entries == 0) {
@@ -297,8 +308,12 @@ int tfs_format(vfs_blk_t *blk, uint16_t bsize, uint8_t entries)
 		return -1;
 	}
 
-	/* directory and FAT: all 0xFF, free */
+	/* directory and FAT: all 0xFF, free (on a flash: erased first) */
 	uint8_t fill[TFS_FILL];
+
+	if (blk->discard != NULL && blk->discard(blk, 0, data) < 0) {
+		return -1;
+	}
 
 	memset(fill, 0xFF, sizeof(fill));
 
@@ -502,7 +517,7 @@ int tfs_open(tfs_t *fs, tfs_file_t *f, const char *name, uint8_t mode)
 	t.gen = (e >= 0) ? (uint8_t)(t.gen + 1u) : 0u;
 	strncpy(t.name, name, TFS_NAME_SIZE - 1);
 	t.name[TFS_NAME_SIZE - 1] = '\0';
-	t.state = (e >= 0) ? TFS_STATE_WRITING : TFS_STATE_VALID;
+	t.state = (e >= 0 || (mode & TFS_TRUNC)) ? TFS_STATE_WRITING : TFS_STATE_VALID;
 	t.first = TFS_NONE;
 	t.size = 0;
 	t.crc = 0;
@@ -687,6 +702,30 @@ int32_t tfs_seek(tfs_file_t *f, int32_t offset, int whence)
 	f->pos = (uint32_t)pos;
 
 	return pos;
+}
+
+int tfs_abort(tfs_file_t *f)
+{
+	if (f == NULL) {
+		return -1;
+	}
+
+	tfs_info_t t;
+
+	if (!(f->mode & TFS_WRITE) || tfs_entry_get(f->fs, f->entry, &t) < 0) {
+		return -1;
+	}
+
+	/* an O_TRUNC file is not committed yet; a write in place has nothing to go back to */
+	if (t.state == TFS_STATE_VALID) {
+		return tfs_close(f);
+	}
+
+	f->mode &= (uint8_t)~(TFS_DIRTY | TFS_REPLACE);
+
+	tfs_entry_drop(f->fs, f->entry, f->first);
+
+	return 0;
 }
 
 int tfs_close(tfs_file_t *f)

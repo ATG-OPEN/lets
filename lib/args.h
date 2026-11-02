@@ -3,10 +3,9 @@
 
 /**
  * @file args.h
- * @brief Splitting and joining command lines.
+ * @brief Splitting command lines, and reading numbers from them.
  *
- * Used by system() to turn a command line into argc / argv, and by programs
- * that pass command lines on.
+ * Used by system() to turn a command line into argc / argv.
  */
 
 #ifndef ARGS_H
@@ -30,20 +29,6 @@
 int args_parse(char *input, char *argv[], int max_args);
 
 /**
- * @brief Joins words into one command line (the reverse of args_parse()).
- *
- * Words are separated by one space; a word with a space or tab in it is put
- * in double quotes. The result is cut to fit and always 0 terminated.
- *
- * @param output  Receives the line.
- * @param max_len Size of @p output in bytes.
- * @param argc    Number of words.
- * @param argv    The words.
- * @return The length of the line.
- */
-int args_combine(char *output, int max_len, int argc, char *argv[]);
-
-/**
  * @brief Parses a dotted path of byte values, such as "1.1.2.250".
  *
  * Numbers may be separated by dots or spaces.
@@ -54,5 +39,17 @@ int args_combine(char *output, int max_len, int argc, char *argv[]);
  * @return The number of values, or -1 when a value is outside 0..255.
  */
 int args_parse_path(char *input, uint8_t *path, int max_length);
+
+/**
+ * @brief Reads a decimal number: [+-]digits[.digits][e[+-]digits].
+ *
+ * What strtod() does for a command line, at a tenth of its size: no hex, inf or
+ * nan, and the last digit of a float may differ.
+ *
+ * @param text The text; blanks before the number are skipped.
+ * @param end  Receives where the number ends, @p text when there is none; can be NULL.
+ * @return The number, or 0 when there is none.
+ */
+float args_float(const char *text, char **end);
 
 #endif /* ARGS_H */

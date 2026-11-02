@@ -106,7 +106,8 @@ typedef struct {
  * @brief Writes an empty file system over the whole device.
  * @param bsize   Block size: a power of two, 16 .. 4096. A multiple of an
  *                EEPROM's page size makes writes faster. 0: by the device
- *                size, 32 below 2 KiB, 64 below 16 KiB, else 128.
+ *                size, 32 below 2 KiB, 64 below 16 KiB, else 128; 4096
+ *                on a flash (a device with discard) of 64 KiB and more.
  * @param entries Most files, 1 .. 255. 0: one per 256 bytes, 4 .. 32.
  * @return 0, or -1 when the device is too small or an argument is bad.
  */
@@ -139,6 +140,13 @@ int32_t tfs_seek(tfs_file_t *f, int32_t offset, int whence);
 
 /** @brief Commits size and CRC of a written file. @return 0, or -1. */
 int tfs_close(tfs_file_t *f);
+
+/**
+ * @brief Gives up a file being written: the O_TRUNC copy or the new file is dropped, the old
+ * one stays. A file written in place has no old copy, so that is a tfs_close().
+ * @return 0 or -1.
+ */
+int tfs_abort(tfs_file_t *f);
 
 /** @brief Deletes a file. @return 0, or -1 when it does not exist. */
 int tfs_remove(tfs_t *fs, const char *name);

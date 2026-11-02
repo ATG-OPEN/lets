@@ -41,10 +41,22 @@ static int flash24_hw_nvm(uint32_t addr, uint16_t op)
 	NVMADR = (uint16_t)addr;
 	NVMCON = op;
 
+	/*
+	 * No interrupt from the unlock sequence to the end of the operation: an
+	 * interrupt taken while it runs is an address error trap. The builtin
+	 * does not do this. UART bytes pile up in the FIFO meanwhile; an erase
+	 * takes about 20 ms, so a fast line overruns and loses bytes.
+	 */
+	INTCON2bits.GIE = 0;
+	__builtin_nop();
+	__builtin_nop();
+
 	__builtin_write_NVM(); /* the unlock sequence, then WR; the CPU stalls until done */
 
 	while (NVMCONbits.WR) {
 	}
+
+	INTCON2bits.GIE = 1;
 
 	NVMCONbits.WREN = 0;
 
@@ -67,7 +79,13 @@ static int flash24_hw_program(uint32_t addr, uint32_t w0, uint32_t w1)
 	__builtin_tblwth(2, (uint16_t)(w1 >> 16));
 	TBLPAG = page;
 
-	return flash24_hw_nvm(addr, FLASH24_DOUBLE_OP);
+	if (flash24_hw_nvm(addr, FLASH24_DOUBLE_OP) < 0) {
+		return -1;
+	}
+
+	/* a program that did not happen raises no error: look */
+	return ((uint16_t)flash24_hw_read(addr) == (uint16_t)w0 &&
+		(uint16_t)flash24_hw_read(addr + 2u) == (uint16_t)w1) ? 0 : -1;
 }
 #endif
 
@@ -210,6 +228,7 @@ int flash24_init(flash24_t *f, uint32_t address)
 
 	f->blk.read = flash24_read;
 	f->blk.write = flash24_write;
+	f->blk.discard = NULL;
 	f->blk.size = FLASH24_HEADER;
 	f->blk.pos = 0;
 	f->base = address;

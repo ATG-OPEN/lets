@@ -2,18 +2,16 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * RAM files: `touch NAME` creates a node with a small buffer (TMP_FILE_SIZE
- * bytes); a write appends to it, a read returns it from the start, `rm NAME`
- * deletes it.
+ * RAM files: a node with a small buffer (TMP_FILE_SIZE bytes). A write appends
+ * to it, a read goes on from where this handle was.
  */
 
 #include "tmp.h"
 
-#include "../fsi/fsi.h"
+#include "../vfs/vfs.h"
 
 #include <unistd.h>
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #define TMP_FILE_SIZE 126 /* bytes per file (the struct is 128) */
@@ -23,119 +21,72 @@ typedef struct {
 	uint8_t memory[TMP_FILE_SIZE];
 } tmp_args_t;
 
-fsi_handler_t tmp_node = {
-	.open_handler = NULL,
-	.read_handler = tmp_read,
-	.write_handler = tmp_write,
-	.lseek_handler = NULL,
-	.execute_handler = NULL,
-	.close_handler = NULL,
-};
-
-/* the RAM file named @name, -1 if none */
-static int tmp_find(const char *name)
+static int tmp_write(void *args, void *buffer, unsigned int length)
 {
-	fsi_node_t *n = fsi_nodes_get();
+	tmp_args_t *a = args;
 
-	for (int i = 3; i < FSI_MAX_NODES_COUNT; i++) {
-		if (n[i].used == FSI_NODE_USED && strcmp(n[i].name, name) == 0) {
-			return i;
-		}
-	}
-
-	return -1;
-}
-
-int tmp_file_create(void *args, int argc, char *argv[])
-{
-	if (argc != 2 || strcmp(argv[1], "-help") == 0) {
-		printf("usage: touch NAME\n");
+	if (length > TMP_FILE_SIZE - a->size) {
 		return -1;
 	}
 
-	/* a name that is taken: nothing to do, as touch on an existing file */
-	if (tmp_find(argv[1]) >= 0) {
-		return 0;
-	}
+	memcpy(a->memory + a->size, buffer, length);
+	a->size += length;
 
+	return (int)length;
+}
+
+static int tmp_read(void *args, void *buffer, unsigned int length)
+{
+	tmp_args_t *a = args;
+	unsigned int *position = vfs_position();
+	unsigned int left = (*position < a->size) ? a->size - *position : 0u;
+
+	length = (length > left) ? left : length;
+
+	memcpy(buffer, a->memory + *position, length);
+	*position += length;
+
+	return (int)length;
+}
+
+static int tmp_lseek(void *args, off_t offset, int whence)
+{
+	return vfs_position_seek(((tmp_args_t *)args)->size, offset, whence);
+}
+
+const vfs_handler_t tmp_node = {
+	.read_handler = tmp_read,
+	.write_handler = tmp_write,
+	.lseek_handler = tmp_lseek,
+};
+
+int tmp_file_create(const char *name)
+{
 	tmp_args_t *a = malloc(sizeof(tmp_args_t));
 
 	if (a == NULL) {
-		printf("out of memory\n");
 		return -1;
 	}
 
 	a->size = 0;
 
-	if (fsi_node_create(argv[1], false, a, &tmp_node) < 0) {
+	int node = vfs_node_new(name, false, a, &tmp_node);
+
+	if (node < 0) {
 		free(a);
-		printf("out of memory\n"); /* the node table is full */
-		return -1;
 	}
 
-	return 0;
+	return node;
 }
 
-int tmp_file_delete(void *args, int argc, char *argv[])
+void tmp_file_truncate(const vfs_node_t *node)
 {
-	if (argc != 2 || strcmp(argv[1], "-help") == 0) {
-		printf("usage: rm NAME\n");
-		return -1;
+	if (node->handlers == &tmp_node && node->args != NULL) {
+		((tmp_args_t *)node->args)->size = 0;
 	}
-
-	int i = tmp_find(argv[1]);
-
-	if (i < 0) {
-		printf("not found\n");
-		return -1;
-	}
-
-	/* only RAM files: a device's args belong to its driver */
-	fsi_node_t *n = fsi_nodes_get() + i;
-
-	if (n->handlers != &tmp_node) {
-		printf("bad argument\n");
-		return -1;
-	}
-
-	free(n->args);
-
-	return fsi_node_delete(argv[1]);
 }
 
-int tmp_write(void *args, void *buffer, unsigned int length)
-{
-	if (args == NULL) {
-		return -1;
-	}
-
-	tmp_args_t *a = args;
-
-	if (length <= TMP_FILE_SIZE - a->size) {
-		memcpy(a->memory + a->size, buffer, length);
-		a->size += length;
-
-		return length;
-	}
-	return -1;
-}
-
-int tmp_read(void *args, void *buffer, unsigned int length)
-{
-	if (args == NULL) {
-		return -1;
-	}
-
-	tmp_args_t *a = args;
-
-	length = (length > a->size) ? a->size : length;
-
-	memcpy(buffer, a->memory, length);
-
-	return length;
-}
-
-int tmp_file_size(const fsi_node_t *node)
+int tmp_file_size(const vfs_node_t *node)
 {
 	if (node == NULL || node->handlers != &tmp_node || node->args == NULL) {
 		return -1;

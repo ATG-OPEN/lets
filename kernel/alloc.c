@@ -180,21 +180,6 @@ int alloc_change_owner(void *ptr, int newowner)
 
 /* -------------------------------------------------------------------------- */
 
-void alloc_map(void)
-{
-	printf("Total %u B free %u B\n", (unsigned)alloc_heap_length, (unsigned)alloc_free_size());
-	printf("SLOT\tOWNER\tOFFSET\tSIZE\n");
-
-	for (int i = 0; i < MAX_BLOCK_COUNT; i++) {
-		if (blocks[i].size == 0) {
-			continue;
-		}
-
-		printf("%u\t%d\t%u\t%u\n", (unsigned)i, blocks[i].owner, (unsigned)blocks[i].offset,
-		       (unsigned)blocks[i].size);
-	}
-}
-
 void alloc_info(void)
 {
 	size_t used = 0;

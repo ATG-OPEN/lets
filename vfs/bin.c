@@ -2,14 +2,16 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * The vfs commands. ls, cat, echo, rm, mv and touch replace the kernel's
- * (same use with bare names, plus paths); cd, pwd, mkdir, cp, crc, mount,
- * umount, mkfs and df are new.
+ * The built-in commands: a table in flash, so they take no RAM.
  */
 
 #include "vfs.h"
 #include "../bin/shell.h"
+#include "../bin/date.h"
+#include "../bin/kill.h"
 #include "../bin/tmp.h"
+#include "../bin/top.h"
+#include "../kernel/task.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -17,7 +19,6 @@
 #include <string.h>
 
 #define BIN_BUFFER_SIZE 64u  /* bytes moved at a time by cat and cp */
-#define BIN_LINE_SIZE	128u /* longest echo line */
 
 /* -------------------------------------------------------------------------- */
 
@@ -38,9 +39,11 @@ static void bin_ls_long(const vfs_dirent_t *e)
 
 	if (e->kind == VFS_DIR) {
 		strcpy(mode, "drwx");
+	} else if (e->kind == VFS_NODE && e->node < 0) {
+		strcpy(mode, "---x"); /* a built-in command */
 	} else if (e->kind == VFS_NODE) {
-		fsi_node_t *n = fsi_nodes_get() + e->node;
-		fsi_handler_t *h = n->handlers;
+		vfs_node_t *n = vfs_nodes_get() + e->node;
+		const vfs_handler_t *h = n->handlers;
 		bool device = (h->read_handler || h->write_handler) && tmp_file_size(n) < 0;
 
 		mode[0] = e->block ? 'b' : device ? 'c' : '-';
@@ -91,18 +94,21 @@ static int bin_ls(void *args, int argc, char *argv[])
 
 	if (p.kind != VFS_DIR) {
 		/* one file or node */
-		tfs_info_t t;
-
 		memset(&e, 0, sizeof(e));
 		strcpy(e.name, p.name);
 		e.kind = p.kind;
 		e.node = p.node;
+
+		vfs_info_t t;
+
 		e.block = (p.kind == VFS_NODE && vfs_blk_get(path) != NULL);
 
-		if (p.kind == VFS_FILE && tfs_stat(vfs_mount_get(p.dir), p.name, &t) == 0) {
+		if (vfs_file_info(&p, &t) == 0) {
 			e.size = t.size;
-		} else if (p.kind == VFS_NODE) {
-			int size = tmp_file_size(&fsi_nodes_get()[p.node]);
+		}
+
+		if (p.kind == VFS_NODE) {
+			int size = tmp_file_size(&vfs_nodes_get()[p.node]);
 
 			if (size > 0) {
 				e.size = (uint32_t)size;
@@ -116,7 +122,7 @@ static int bin_ls(void *args, int argc, char *argv[])
 	uint16_t index = 0;
 
 	while (vfs_dir_read(p.dir, &index, &e) == 0) {
-		/* commands are hidden by fsi, but /bin is where they are listed */
+		/* commands are hidden, but /bin is where they are listed */
 		if (e.hidden && !all && p.dir != VFS_BIN) {
 			continue;
 		}
@@ -191,7 +197,7 @@ static int bin_rm(void *args, int argc, char *argv[])
 
 	/* devices, commands and mount points stay; a directory must be empty */
 	if (vfs_remove(argv[1]) < 0) {
-		printf(p.kind == VFS_DIR ? "not empty\n" : "bad argument\n");
+		printf(p.kind == VFS_DIR ? "not empty\n" : "busy or not a file\n");
 		return -1;
 	}
 
@@ -224,17 +230,24 @@ static int bin_touch(void *args, int argc, char *argv[])
 	return close(fd);
 }
 
-/* cat [-x] path: a file to its end; a node with one read, as fsi */
+/* a file or a RAM file, read to its end; a sensor has no end, it gets one read */
+static bool bin_has_end(int fd)
+{
+	return vfs_file_is(fd) || tmp_file_size(vfs_fd_node(fd)) >= 0;
+}
+
+/* cat [-x] path: a file to its end; a node with one read. No path: what stdin was sent to */
 static int bin_cat(void *args, int argc, char *argv[])
 {
-	bool hex = (argc == 3 && strcmp(argv[1], "-x") == 0);
+	bool hex = (argc > 1 && strcmp(argv[1], "-x") == 0);
+	bool in = (argc == (hex ? 2 : 1)) && task_streams()->in >= 0;
 
-	if (argc != (hex ? 3 : 2)) {
+	if (argc != (hex ? 3 : 2) && !in) {
 		printf("usage: cat [-x] file\n");
 		return -1;
 	}
 
-	int fd = open(argv[argc - 1], 0, 0);
+	int fd = in ? 0 : open(argv[argc - 1], 0, 0);
 
 	if (fd < 0) {
 		printf("open failed\n");
@@ -244,12 +257,15 @@ static int bin_cat(void *args, int argc, char *argv[])
 	char *buffer = malloc(BIN_BUFFER_SIZE);
 
 	if (buffer == NULL) {
-		close(fd);
+		if (!in) {
+			close(fd);
+		}
+
 		printf("out of memory\n");
 		return -1;
 	}
 
-	bool file = (vfs_file_get(fd) != NULL);
+	bool file = bin_has_end(vfs_stream(fd));
 	int total = 0;
 	char last = '\n';
 	int n;
@@ -274,71 +290,22 @@ static int bin_cat(void *args, int argc, char *argv[])
 	}
 
 	free(buffer);
-	close(fd);
+
+	if (!in) {
+		close(fd);
+	}
 
 	return total;
 }
 
-/* echo words [> path | >> path] */
+/* echo words */
 static int bin_echo(void *args, int argc, char *argv[])
 {
-	int end = argc; /* first word not echoed */
-	int flags = 0;
-
 	for (int i = 1; i < argc; i++) {
-		if (strcmp(argv[i], ">") == 0 || strcmp(argv[i], ">>") == 0) {
-			if (i + 2 != argc) {
-				return bin_bad();
-			}
-
-			end = i;
-			flags = O_WRONLY | O_CREAT | (argv[i][1] ? O_APPEND : O_TRUNC);
-			break;
-		}
+		printf("%s%s", argv[i], (i < argc - 1) ? " " : "");
 	}
 
-	char *line = malloc(BIN_LINE_SIZE);
-
-	if (line == NULL) {
-		printf("out of memory\n");
-		return -1;
-	}
-
-	line[0] = '\0';
-
-	for (int i = 1; i < end; i++) {
-		if (strlen(line) + strlen(argv[i]) + 2u >= BIN_LINE_SIZE) {
-			break;
-		}
-
-		strcat(line, argv[i]);
-
-		if (i < end - 1) {
-			strcat(line, " ");
-		}
-	}
-
-	strcat(line, "\n");
-
-	int r = 0;
-
-	if (end == argc) {
-		printf("%s", line);
-	} else {
-		int fd = open(argv[argc - 1], flags, 0);
-
-		if (fd < 0) {
-			printf("echo: cannot open file\n");
-			r = -1;
-		} else {
-			r = (write(fd, line, strlen(line)) < 0) ? -1 : 0;
-			close(fd);
-		}
-	}
-
-	free(line);
-
-	return r;
+	return (printf("\n") < 0) ? -1 : 0;
 }
 
 /* cp from to: `to` may be a directory */
@@ -373,7 +340,7 @@ static int bin_cp(void *args, int argc, char *argv[])
 	int total = 0;
 
 	if (in >= 0 && out >= 0) {
-		bool file = (vfs_file_get(in) != NULL);
+		bool file = bin_has_end(in);
 		int n;
 
 		do {
@@ -391,7 +358,10 @@ static int bin_cp(void *args, int argc, char *argv[])
 		total = -1;
 	}
 
-	if (out >= 0) {
+	/* a copy that failed must not replace what was there */
+	if (out >= 0 && total < 0) {
+		vfs_file_abort(out);
+	} else if (out >= 0) {
 		close(out);
 	}
 
@@ -404,82 +374,68 @@ static int bin_cp(void *args, int argc, char *argv[])
 	return (total < 0) ? -1 : 0;
 }
 
-/* crc path: size and CRC-32 of a file, checked against the stored one */
-static int bin_crc(void *args, int argc, char *argv[])
-{
-	vfs_path_t p;
-	tfs_info_t t;
-
-	if (argc != 2 || vfs_resolve(argv[1], &p) < 0 || p.kind != VFS_FILE ||
-	    tfs_stat(vfs_mount_get(p.dir), p.name, &t) < 0) {
-		return bin_bad();
-	}
-
-	int fd = open(argv[1], 0, 0);
-	uint8_t *buffer = malloc(BIN_BUFFER_SIZE);
-	uint32_t crc = 0;
-	int n = -1;
-
-	while (fd >= 0 && buffer != NULL && (n = read(fd, buffer, BIN_BUFFER_SIZE)) > 0) {
-		crc = tfs_crc32(crc, buffer, (unsigned int)n);
-	}
-
-	free(buffer);
-
-	if (fd >= 0) {
-		close(fd);
-	}
-
-	if (n < 0) {
-		printf("open failed\n");
-		return -1;
-	}
-
-	const char *check = !(t.attr & TFS_ATTR_CRC) ? "" : (crc == t.crc) ? " ok" : " BAD";
-
-	printf("%lu %08lX%s\n", (unsigned long)t.size, (unsigned long)crc, check);
-
-	return (*check == ' ' && crc != t.crc) ? -1 : 0;
-}
-
 /* -------------------------------------------------------------------------- */
 
-/* df: every mounted file system, its size and free bytes */
+/* df: every mounted file system: what is mounted, size, used and free bytes, where */
 static int bin_df(void *args, int argc, char *argv[])
 {
 	char path[VFS_PATH_MAX];
 	int count = 0;
 
+	printf("%-10s %-5s %9s %9s %9s  %s\n", "Device", "Type", "Size", "Used", "Avail", "Mounted on");
+
 	for (int i = VFS_DIR_FIRST; i < VFS_DIR_FIRST + (int)VFS_DIRS_MAX; i++) {
-		tfs_t *fs = vfs_mount_get((uint8_t)i);
+		const vfs_fs_type_t *type;
+		void *fs = vfs_mount_get((uint8_t)i, &type);
+		uint32_t size, avail;
 
 		if (fs == NULL || vfs_dir_path((uint8_t)i, path, sizeof(path)) < 0) {
 			continue;
 		}
 
-		printf("%s\t%lu\t%lu\n", path, (unsigned long)fs->blocks * fs->bsize,
-		       (unsigned long)tfs_free(fs));
+		printf("%-10s %-5s ", type->source(fs), type->name);
+
+		if (type->usage != NULL && type->usage(fs, &size, &avail) == 0) {
+			printf("%9lu %9lu %9lu", (unsigned long)size, (unsigned long)(size - avail),
+			       (unsigned long)avail);
+		} else {
+			printf("%9s %9s %9s", "-", "-", "-");
+		}
+
+		printf("  %s\n", path);
 		count++;
 	}
 
 	return count;
 }
 
-/* mount [-f] dev path; no arguments: as df */
+/* mount [-f] [-t type] source path; no arguments: as df */
 static int bin_mount(void *args, int argc, char *argv[])
 {
-	bool format = (argc == 4 && strcmp(argv[1], "-f") == 0);
+	const char *type = "tfs";
+	bool format = false;
+	int i = 1;
 
 	if (argc == 1) {
 		return bin_df(args, argc, argv);
 	}
 
-	if (argc != (format ? 4 : 3)) {
-		printf("usage: mount [-f] dev path\n");
+	for (; i < argc && argv[i][0] == '-'; i++) {
+		if (strcmp(argv[i], "-f") == 0) {
+			format = true;
+		} else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
+			type = argv[++i];
+		} else {
+			break;
+		}
+	}
+
+	if (argc - i != 2) {
+		printf("usage: mount [-f] [-t type] source path\n");
 		return -1;
 	}
 
-	if (vfs_mount(argv[argc - 2], argv[argc - 1], format) < 0) {
+	if (vfs_mount_type(type, argv[i], argv[i + 1], format) < 0) {
 		printf("mount failed\n");
 		return -1;
 	}
@@ -496,36 +452,6 @@ static int bin_umount(void *args, int argc, char *argv[])
 	if (vfs_umount(argv[1]) < 0) {
 		printf("umount failed\n");
 		return -1;
-	}
-
-	return 0;
-}
-
-/* mkfs dev [block size] [entries] */
-static int bin_mkfs(void *args, int argc, char *argv[])
-{
-	if (argc < 2 || argc > 4) {
-		printf("usage: mkfs dev [block] [entries]\n");
-		return -1;
-	}
-
-	vfs_blk_t *blk = vfs_blk_get(argv[1]);
-	int bsize = (argc > 2) ? atoi(argv[2]) : 0; /* 0: by the device size */
-	int entries = (argc > 3) ? atoi(argv[3]) : 0;
-
-	if (blk == NULL || bsize < 0 || entries < 0 || entries > 255) {
-		return bin_bad();
-	}
-
-	for (int i = VFS_DIR_FIRST; i < VFS_DIR_FIRST + (int)VFS_DIRS_MAX; i++) {
-		if (vfs_mount_get((uint8_t)i) != NULL && vfs_mount_get((uint8_t)i)->blk == blk) {
-			printf("mounted\n");
-			return -1;
-		}
-	}
-
-	if (tfs_format(blk, (uint16_t)bsize, (uint8_t)entries) < 0) {
-		return bin_bad();
 	}
 
 	return 0;
@@ -561,7 +487,7 @@ static int bin_names_in(uint8_t dir, bool (*candidate)(const char *, bool))
  * A word with a '/' completes in the directory it names (`../`, `/dev/t`,
  * `logs/a`). The first word without one is a command. Any other word
  * completes in the working directory, or, when nothing there matches, with
- * the bare names fsi finds from anywhere (`std tt` -> ttyS1).
+ * the bare names found from anywhere (`std tt` -> ttyS1).
  */
 static void bin_names(const char *word, bool command, bool (*candidate)(const char *, bool))
 {
@@ -605,34 +531,38 @@ static void bin_prompt(void)
 	}
 
 	if (strncmp(path, VFS_HOME, home) == 0 && (path[home] == '\0' || path[home] == '/')) {
-		write(2, "~", 1);
+		shell_write("~", 1);
 		shown = path + home;
 	}
 
-	write(2, (void *)shown, strlen(shown));
-	write(2, "$ ", 2);
+	shell_write(shown, strlen(shown));
+	shell_write("$ ", 2);
 }
+
+const vfs_command_t vfs_commands[] = {
+	{"cat", bin_cat},	{"cd", bin_cd},
+	{"cp", bin_cp},		{"date", date_execute},
+	{"df", bin_df},		{"echo", bin_echo},
+	{"kill", kill},		{"ls", bin_ls},
+	{"mkdir", bin_mkdir},	{"mount", bin_mount},
+	{"mv", bin_mv},		{"pwd", bin_pwd},
+	{"rm", bin_rm},		{"std", vfs_std_execute},
+	{"top", top},		{"touch", bin_touch},
+	{"umount", bin_umount}, {"uptime", date_uptime_execute},
+#ifndef VFS_NO_REDIRECT
+	{"shell", shell_start},
+#endif
+#ifndef VFS_NO_TFS
+	{"crc", vfs_tfs_crc},	{"mkfs", vfs_tfs_mkfs},
+#endif
+};
+
+const unsigned int vfs_commands_count = sizeof(vfs_commands) / sizeof(vfs_commands[0]);
 
 int vfs_bin_initialize(void)
 {
 	shell_names_set(bin_names);
 	shell_prompt_set(bin_prompt);
 
-	vfs_app_set("ls", bin_ls);
-	vfs_app_set("cat", bin_cat);
-	vfs_app_set("echo", bin_echo);
-	vfs_app_set("rm", bin_rm);
-	vfs_app_set("mv", bin_mv);
-	vfs_app_set("touch", bin_touch);
-	vfs_app_set("cd", bin_cd);
-	vfs_app_set("pwd", bin_pwd);
-	vfs_app_set("mkdir", bin_mkdir);
-	vfs_app_set("cp", bin_cp);
-	vfs_app_set("crc", bin_crc);
-	vfs_app_set("mount", bin_mount);
-	vfs_app_set("umount", bin_umount);
-	vfs_app_set("mkfs", bin_mkfs);
-	vfs_app_set("df", bin_df);
-
-	return 0;
+	return date_initialize();
 }

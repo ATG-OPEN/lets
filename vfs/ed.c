@@ -54,10 +54,10 @@ int vfs_ed(void *args, int argc, char *argv[])
 
 	int add = length + 2; /* and its '\n', and one before it if the file has none at the end */
 
-	int fd = open(argv[1], 0, 0);
+	int fd = open(argv[1], O_RDONLY, 0);
 	long end = (fd < 0) ? 0 : (long)lseek(fd, 0, SEEK_END);
 
-	/* a file has a size; a device or a RAM file has none */
+	/* a file has a size; a device has none */
 	if (end < 0 || end > ED_FILE_MAX || (fd >= 0 && lseek(fd, 0, SEEK_SET) != 0)) {
 		close(fd);
 		printf(end < 0 ? "not a file\n" : "too long\n");
@@ -159,7 +159,10 @@ int vfs_ed(void *args, int argc, char *argv[])
 		r = -1;
 	}
 
-	if (fd >= 0) {
+	/* an edit that failed must not replace what was there */
+	if (r < 0) {
+		vfs_file_abort(fd);
+	} else {
 		close(fd);
 	}
 

@@ -4,17 +4,19 @@
 #include "gpa.h"
 
 #include "../kernel/task.h"
-#include "../fsi/fsi.h"
+#include "../vfs/vfs.h"
 
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
+#include "../lib/args.h"
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
 
-fsi_handler_t gpa_node = {
+const vfs_handler_t gpa_node = {
 	.open_handler = NULL,
 	.read_handler = gpa_read,
 	.write_handler = gpa_write,
@@ -28,7 +30,7 @@ int gpa_register_node(char *name, void *args)
 	if (name == NULL || args == NULL)
 		return -1;
 
-	if (fsi_node_create(name, false, args, &gpa_node) < 0)
+	if (vfs_node_create(name, false, args, &gpa_node) < 0)
 		return -1;
 
 	return 0;
@@ -61,7 +63,7 @@ int gpa_read(void *args, void *buffer, unsigned int length)
 	if (args == NULL || buffer == NULL)
 		return -1;
 
-	if (length == 0)
+	if (length < sizeof(float))
 		return 0;
 
 	gpa_t *m = args;
@@ -74,7 +76,7 @@ int gpa_read(void *args, void *buffer, unsigned int length)
 
 	*data = ((float)value - m->read_offset) * m->read_k;
 
-	return length;
+	return sizeof(float);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -220,8 +222,8 @@ int gpa_execute(void *args, int argc, char *argv[])
 			}
 
 			input->args = args;
-			input->delay = atof(argv[3]);
-			input->delta = atof(argv[4]);
+			input->delay = args_float(argv[3], NULL);
+			input->delta = args_float(argv[4], NULL);
 			input->value = 0;
 			input->last_update_time = 0;
 
@@ -274,8 +276,8 @@ int gpa_execute(void *args, int argc, char *argv[])
 			(float *)(buf + sizeof(gpa_output_t) + sizeof(float) * element_count);
 
 		for (int i = 0; i < element_count; i++) {
-			output->delay[i] = atof(argv[3 + i * 2]);
-			output->value[i] = atof(argv[4 + i * 2]);
+			output->delay[i] = args_float(argv[3 + i * 2], NULL);
+			output->value[i] = args_float(argv[4 + i * 2], NULL);
 		}
 
 		strncpy(output->name, argv[0], sizeof(output->name) - 1);
@@ -294,12 +296,12 @@ int gpa_execute(void *args, int argc, char *argv[])
 		}
 
 		if (strcmp(argv[2], "-i") == 0) {
-			g->read_offset = atof(argv[3]);
-			g->read_k = atof(argv[4]);
+			g->read_offset = args_float(argv[3], NULL);
+			g->read_k = args_float(argv[4], NULL);
 			return 0;
 		} else if (strcmp(argv[2], "-o") == 0) {
-			g->write_offset = atof(argv[3]);
-			g->write_k = atof(argv[4]);
+			g->write_offset = args_float(argv[3], NULL);
+			g->write_k = args_float(argv[4], NULL);
 			return 0;
 		}
 
