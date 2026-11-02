@@ -46,8 +46,13 @@ A task can stop itself, for example `kill shell` typed in the shell. Its memory 
 returns; `task_stopping()` says it should, and whatever it returns, it is not woken again.
 
 A sleep counts from the last wake, so `return 5` is a period of 5 ms whatever the task took. One
-that falls behind starts over from now. `top` shows each task's last and longest call (`DUR`,
-`MAX`): the longest call of any task is what all the others have to wait.
+that falls behind starts over from now. `top` shows each task's last and longest call (`LAST`,
+`MAX`), the time between its calls (`PERIOD`) and its share of the time (`CPU`): the longest
+call of any task is what all the others have to wait.
+
+A command whose work goes on in a task of its own (as `top` does: one line per call, so a full
+DRN port only delays a line) calls `shell_wait(task)`: the shell it was typed into shows no
+prompt and reads no input until that task ends, and Ctrl-C stops it.
 
 Tasks never block or busy-wait; keep each call short.
 

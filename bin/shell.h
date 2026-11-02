@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../kernel/task.h"
+
 /**
  * @brief Registers the built-in commands and starts the shell.
  *
@@ -34,6 +36,16 @@
  * @return 0.
  */
 int shell_initialize(void);
+
+/**
+ * @brief Makes the shell a command was typed into wait for the task @p t.
+ *
+ * For a command that leaves its work to a task, such as `top`: until @p t ends
+ * the shell shows no prompt and reads no input (on a terminal Ctrl-C stops
+ * @p t), so the task's output comes before the next prompt and the next
+ * command. Outside a command typed into a shell (rc, argscript) it does nothing.
+ */
+void shell_wait(task_t *t);
 
 /** @brief The `shell` command: shell [-t] < in > out, a shell on these streams. */
 int shell_start(void *args, int argc, char *argv[]);

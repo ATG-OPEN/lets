@@ -36,7 +36,7 @@ static uint64_t now_us(void)
 /* -------------------------------------------------------------------------- */
 /* a node that records what is written to it and returns a fixed text when read */
 
-static char sink[256];
+static char sink[2048];
 static unsigned sink_len;
 
 static int sink_write(void *args, void *buffer, unsigned int length)
@@ -77,6 +77,32 @@ static int term_read(void *args, void *buffer, unsigned int length)
 }
 
 static vfs_handler_t term_node = {.write_handler = sink_write, .read_handler = term_read};
+
+/* a port whose queue is full every other write, as a DRN port is: write() returns 0 */
+static char narrow[2048];
+static unsigned narrow_len;
+static unsigned narrow_writes;
+
+static int narrow_write(void *args, void *buffer, unsigned int length)
+{
+	(void)args;
+	if (narrow_writes++ % 2 == 0 || narrow_len + length >= sizeof(narrow))
+		return 0;
+	memcpy(narrow + narrow_len, buffer, length);
+	narrow_len += length;
+	narrow[narrow_len] = '\0';
+	return (int)length;
+}
+
+static vfs_handler_t narrow_node = {.write_handler = narrow_write};
+
+static unsigned count_of(const char *text, const char *what)
+{
+	unsigned n = 0;
+	for (const char *p = strstr(text, what); p != NULL; p = strstr(p + 1, what))
+		n++;
+	return n;
+}
 
 int shell_loop(void *args, uint64_t system_time); /* bin/shell.c: the shell task */
 
@@ -452,6 +478,66 @@ static int checks(void *args, uint64_t t)
 		/* a period stays one, whatever the task takes: 10 periods of 5 ms */
 		CHECK(beat_last - beat_first >= 49000 && beat_last - beat_first < 52000);
 		task_stop_byname("beat");
+
+		/* top into a port that is full every other write: every line, once */
+		CHECK(vfs_node_create("narrow", false, NULL, &narrow_node) >= 0);
+		CHECK(system("top > narrow") == 0);
+		step = 10;
+		step_waits = 0;
+		return 1;
+	}
+	if (step == 10) {
+		/* until top has ended on its own: its task is gone */
+		bool running = false;
+		task_t *table = task_get_data();
+		for (int i = 0; i < TASKS_MAX_COUNT; i++)
+			running |= table[i].state != TASK_UNUSED && strcmp(table[i].info.name, "top") == 0;
+		if (running && step_waits++ < 1000) {
+			return 1;
+		}
+		CHECK(!running);
+
+		/* "tasks N" in the first line, then memory, the header and N rows */
+		const char *at = strstr(narrow, "tasks ");
+		unsigned tasks = at ? (unsigned)atoi(at + 6) : 0;
+
+		CHECK(strncmp(narrow, "up ", 3) == 0 && strstr(narrow, "\nheap ") != NULL);
+		CHECK(count_of(narrow, " ID NAME") == 1 && count_of(narrow, "up ") == 1);
+		CHECK(tasks > 0 && count_of(narrow, "\n") == tasks + 3);
+		CHECK(strstr(narrow, " checks ") != NULL && strstr(narrow, " top ") != NULL);
+
+		/* typed on a terminal: the shell waits for top, its prompt comes after the last line */
+		sink_len = 0;
+		sink[0] = '\0';
+		keys = "";
+		CHECK(system("shell -t < term > term") == 0);
+		step = 11;
+		step_waits = 0;
+		return 30;
+	}
+	if (step == 11) {
+		/* what the shell shows before anything is typed: its prompt */
+		static char prompt[16];
+
+		if (prompt[0] == '\0') {
+			CHECK(sink_len > 0 && sink_len < sizeof(prompt));
+			strcpy(prompt, sink);
+			keys = "top\r";
+			return 30;
+		}
+
+		if ((count_of(sink, prompt) < 2 || strstr(sink, " top ") == NULL) && step_waits++ < 1000) {
+			return 1;
+		}
+
+		const char *rows = strstr(sink, " ID NAME");
+
+		CHECK(rows != NULL && count_of(sink, prompt) == 2);
+		CHECK(rows != NULL && count_of(rows, prompt) == 1); /* none in between */
+
+		size_t end = strlen(sink) - strlen(prompt);
+		CHECK(strcmp(sink + end, prompt) == 0 && sink[end - 2] == '\r' && sink[end - 1] == '\n');
+		CHECK(system("kill shell") == 0);
 
 		fprintf(stderr, "kernel: %s\n", failures ? "FAILED" : "ok");
 		exit(failures != 0);

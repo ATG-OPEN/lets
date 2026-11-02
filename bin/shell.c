@@ -68,6 +68,9 @@ typedef struct {
 	bool last_cr;	     /* the previous key was '\r' (a "\r\n" Enter) */
 	uint8_t escape;	     /* 0, or 1 after ESC, 2 after ESC [ */
 	uint8_t idle;	     /* polls with no input, on a link */
+	bool in_command;     /* a command typed here runs now: shell_wait() is for this shell */
+	task_t *wait;	     /* a task a command left running: no prompt, no input until it ends */
+	int (*wait_entry)(void *arg, uint64_t system_time); /* its function: the slot may be reused */
 #if SHELL_HISTORY > 0
 	char (*history)[SHELL_BUFFER_SIZE]; /* [0] is the newest; from the heap, on first use */
 	int recalled;			    /* 0: the line is new, k: history[k - 1] is shown */
@@ -108,6 +111,39 @@ void shell_write(const void *data, unsigned int length)
 			shell_flush();
 		}
 	}
+}
+
+void shell_wait(task_t *t)
+{
+	if (t != NULL && shell->in_command) {
+		shell->wait = t;
+		shell->wait_entry = t->entry;
+	}
+}
+
+/* runs a command typed here */
+static void shell_run(char *line)
+{
+	shell->in_command = true;
+	system(line);
+	shell->in_command = false;
+}
+
+/* a command's task still runs: true while the shell waits for it */
+static bool shell_waiting(void)
+{
+	task_t *t = shell->wait;
+
+	if (t == NULL) {
+		return false;
+	}
+
+	if (t->state == TASK_UNUSED || t->entry != shell->wait_entry) {
+		shell->wait = NULL;
+		return false;
+	}
+
+	return true;
 }
 
 static void shell_print(const char *text)
@@ -363,7 +399,7 @@ static void shell_enter(void)
 	/* an empty line: the new line and the prompt go out together */
 	if (length > 0) {
 		shell_flush(); /* the line ends before the command's output */
-		system(shell->buffer);
+		shell_run(shell->buffer);
 	}
 }
 
@@ -466,12 +502,17 @@ static void shell_lines(bool all)
 		buf[n] = '\0';
 
 		if (n > 0) {
-			system(buf);
+			shell_run(buf);
 		}
 
 		n += (n < shell->length) ? 1u : 0u;
 		shell->length -= n;
 		memmove(buf, buf + n, shell->length);
+
+		/* the command left a task running: the next lines wait for it */
+		if (shell_waiting()) {
+			return;
+		}
 	}
 }
 
@@ -486,6 +527,34 @@ int shell_loop(void *args, uint64_t system_time)
 	if (!shell->started) {
 		shell->started = true;
 		vfs_chdir(VFS_HOME);
+	}
+
+	/*
+	 * A command's task still writes: no prompt and no input until it ends,
+	 * so its output comes before the prompt. Ctrl-C on a terminal stops it.
+	 */
+	if (shell_waiting()) {
+#ifndef SHELL_NO_TERMINAL
+		if (vfs_terminal()) {
+			char keys[8];
+			int size = read(0, keys, sizeof(keys));
+
+			if (size > 0 && memchr(keys, 0x03, (size_t)size) != NULL) {
+				task_stop_byname(shell->wait->info.name);
+				shell->wait = NULL;
+			}
+		}
+#endif
+		return 10;
+	}
+
+	/* lines left behind by a wait */
+	if (!vfs_terminal() && shell->length > 0) {
+		shell_lines(false);
+
+		if (shell_waiting()) {
+			return 10;
+		}
 	}
 
 #ifndef SHELL_NO_TERMINAL
@@ -510,6 +579,11 @@ int shell_loop(void *args, uint64_t system_time)
 
 		for (int i = 0; i < size && !task_stopping(); i++) {
 			shell_key(keys[i]);
+
+			/* a command left a task running: the prompt comes when it ends */
+			if (shell_waiting()) {
+				break;
+			}
 
 			if (!shell->prompted && vfs_terminal() && !task_stopping()) {
 				shell_prompt(); /* the command is done: the next line */
