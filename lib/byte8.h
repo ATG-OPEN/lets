@@ -43,6 +43,7 @@
 #define BYTE8_MAX_DATA_SIZE	  250u	/**< Most data bytes per packet. */
 #define BYTE8_OVERHEAD		  3u	/**< Start, size and link bytes. */
 #define BYTE8_CRC16_OVERHEAD	  2u	/**< CRC bytes, in CRC16 mode. */
+#define BYTE8_MAX_FRAME_SIZE	  (BYTE8_MAX_DATA_SIZE + BYTE8_OVERHEAD + BYTE8_CRC16_OVERHEAD) /**< Longest packet on the wire. */
 #define BYTE8_HEADER_SYMBOL	  0xFFu /**< Start of a packet. */
 #define BYTE8_NO_HEADER_INDICATOR 0xFEu /**< End of the 0xFF chain. */
 
@@ -107,5 +108,31 @@ int byte8_read(int fd, void *buf, unsigned int size, byte8_t *session);
  * @return The result of write(): the bytes written including the overhead.
  */
 int byte8_write(int fd, void *buf, unsigned int size, byte8_t *session);
+
+/**
+ * @brief Decodes received bytes that are already in memory: for a stream that
+ * is not a file handle (an async socket, a callback).
+ *
+ * Stops at the end of a packet. Call it again with the rest (@p raw + *used)
+ * until all @p n bytes are used; a packet may span calls.
+ *
+ * @param raw     Received bytes.
+ * @param n       How many.
+ * @param buf     Receives the packet's data.
+ * @param size    Size of @p buf; a bigger packet is dropped.
+ * @param session The link state; its pr_buffer holds the packet being received.
+ * @param used    Set to the bytes of @p raw used: up to the end of a packet, or all.
+ * @return Data bytes in @p buf, BYTE8_ERROR_NO_PACKET or BYTE8_ERROR_CRC16.
+ */
+int byte8_feed(const void *raw, unsigned int n, void *buf, unsigned int size, byte8_t *session,
+	       unsigned int *used);
+
+/**
+ * @brief Puts @p size bytes (cut to BYTE8_MAX_DATA_SIZE) in one packet, as byte8_write() sends it.
+ * @param frame Receives the packet: BYTE8_MAX_FRAME_SIZE bytes are always enough.
+ * @param mode  BYTE8_STANDARD_MODE or BYTE8_CRC16_MODE.
+ * @return The packet's size, 0 for no data.
+ */
+int byte8_encode(const void *data, unsigned int size, void *frame, uint8_t mode);
 
 #endif /* BYTE8_H */
