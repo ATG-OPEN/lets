@@ -629,6 +629,27 @@ enum {
 	AS_K_COUNT
 };
 
+/* true when only empty lines, comments and labels follow the line just fetched */
+static bool as_last(const as_state_t *s)
+{
+	const char *p = s->src + s->pos;
+
+	while (*p != '\0') {
+		while (*p == ' ' || *p == '\t' || *p == '\r') {
+			p++;
+		}
+
+		if (*p != '\n' && *p != '\0' && *p != '#' && *p != ':') {
+			return false;
+		}
+
+		p += strcspn(p, "\n");
+		p += (*p == '\n');
+	}
+
+	return true;
+}
+
 /* one line from as_raw, < 0 stops the script */
 static int as_step(as_state_t *s)
 {
@@ -647,6 +668,25 @@ static int as_step(as_state_t *s)
 	}
 
 	if (k == AS_K_COUNT) {
+		/*
+		 * The script's last command, outside any block: nothing reads the state after it, so it is
+		 * freed first. A boot script holds its copy of the text and its variables (half a KB on a
+		 * small board) up to here; the last line often starts a task that needs that memory.
+		 */
+		if (s->depth == 0 && as_last(s)) {
+			task_t *t = task_get_data();
+			int i = task_get_current();
+
+			if (i >= 0 && t[i].arg == s) {
+				t[i].arg = NULL; /* the task no longer owns it */
+			}
+
+			free(s);
+			system(as_line); /* as_line is not in the state */
+
+			return -1;
+		}
+
 		int r = system(as_line);
 
 		/* the command may have stopped this script */

@@ -206,6 +206,12 @@ int t_system(const char *cmd)
 		return -1;
 	}
 
+	/* whether the script still holds its state while this command runs */
+	if (strcmp(cmd, "state") == 0) {
+		log_add((current >= 0 && tasks[current].arg == NULL) ? "[freed]" : "[held]");
+		return 0;
+	}
+
 	if (strncmp(cmd, "as ", 3) == 0) {
 		char buf[64];
 		strcpy(buf, cmd);
@@ -316,6 +322,14 @@ int main(void)
 
 	check("as from node", "as script", 5, "[echo file 3][echo file 2][echo file 1]");
 	check("as long file", "as long", 20, "[echo long 4]");
+
+	/* the last command runs with the script's memory already freed */
+	check("last line frees", "echo a\nstate", 5, "[echo a][freed]");
+	check("last line, comments after", "state\n\n  # done\n:label\n", 5, "[freed]");
+	check("not the last line", "state\necho b", 5, "[held][echo b]");
+	check("last line in a block", "if 1\nstate\nend", 5, "[held]");
+	check("last line in a loop", "repeat 2\nstate\nend", 5, "[held][held]");
+	check("last line kills the script", "echo a\nkill t", 5, "[echo a]");
 
 	check("busy loop yields", "while 1\nend", 3, "");
 
