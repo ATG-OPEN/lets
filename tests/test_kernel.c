@@ -80,6 +80,7 @@ static vfs_handler_t term_node = {.write_handler = sink_write, .read_handler = t
 
 /* a port whose queue is full every other write, as a DRN port is: write() returns 0 */
 static char narrow[2048];
+static int ls_shown;
 static unsigned narrow_len;
 static unsigned narrow_writes;
 
@@ -505,6 +506,55 @@ static int checks(void *args, uint64_t t)
 		CHECK(count_of(narrow, " ID NAME") == 1 && count_of(narrow, "up ") == 1);
 		CHECK(tasks > 0 && count_of(narrow, "\n") == tasks + 3);
 		CHECK(strstr(narrow, " checks ") != NULL && strstr(narrow, " top ") != NULL);
+
+		/* cat of a file into it: a line at a time from a task of its own, every line once, in order */
+		/* a RAM file holds 126 bytes: 20 short lines */
+		system("rm /tmp/many");
+		CHECK(system("touch /tmp/many") == 0);
+		for (int i = 0; i < 20; i++) {
+			char line[40];
+			snprintf(line, sizeof(line), "echo l%02d >> /tmp/many", i);
+			CHECK(system(line) == 0);
+		}
+		narrow_len = 0;
+		narrow[0] = '\0';
+		CHECK(system("cat /tmp/many > narrow") > 0);
+		step = 30;
+		step_waits = 0;
+		return 1;
+	}
+	if (step == 30 || step == 31) {
+		const char *name = (step == 30) ? "cat" : "ls";
+		bool running = false;
+		task_t *table = task_get_data();
+		for (int i = 0; i < TASKS_MAX_COUNT; i++)
+			running |= table[i].state != TASK_UNUSED && strcmp(table[i].info.name, name) == 0;
+		if (running && step_waits++ < 1000) {
+			return 1;
+		}
+		CHECK(!running);
+
+		if (step == 30) {
+			bool in_order = count_of(narrow, "\n") == 20;
+			for (int i = 0; i < 20 && in_order; i++) {
+				char line[40];
+				snprintf(line, sizeof(line), "l%02d\n", i);
+				in_order = strncmp(narrow + i * (int)strlen(line), line, strlen(line)) == 0;
+			}
+			CHECK(in_order);
+
+			/* ls -l of /bin, a line a command */
+			int shown = system("ls /bin");
+			narrow_len = 0;
+			narrow[0] = '\0';
+			CHECK(shown > 4 && system("ls -l /bin > narrow") == shown);
+			step = 31;
+			step_waits = 0;
+			ls_shown = shown;
+			return 1;
+		}
+
+		CHECK(count_of(narrow, "\n") == (unsigned)ls_shown && strncmp(narrow, "---x", 4) == 0);
 
 		/* typed on a terminal: the shell waits for top, its prompt comes after the last line */
 		sink_len = 0;

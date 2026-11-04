@@ -9,6 +9,7 @@
  */
 
 #include "vfs.h"
+#include "../bin/lines.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -39,10 +40,140 @@ static int ed_line(const char *text, int size, long n)
 	return at;
 }
 
+/*
+ * The listing: one numbered line (or a part of a long one) at a time, read
+ * from the file each time, so a stream that takes only a few lines at once
+ * (lines.h) gets them all and only one line is in memory.
+ */
+typedef struct {
+	lines_t lines;
+	uint32_t at;	/* where the next piece starts in the file */
+	uint32_t size;	/* of the file */
+	uint16_t line;	/* its number */
+	uint8_t tries;	/* reads that failed in a row (a full heap: open() needs memory) */
+	bool mid;	/* inside a line longer than a piece */
+	char path[];
+} ed_list_t;
+
+static unsigned int ed_list_next(lines_t *l, char *piece, unsigned int max)
+{
+	ed_list_t *e = (ed_list_t *)l;
+	unsigned int n = 0;
+
+	if (!e->mid) {
+		/* "%3u  " by hand: snprintf() is slow on a small MCU */
+		char d[5];
+		unsigned int k = 0, v = e->line;
+
+		do {
+			d[k++] = (char)('0' + v % 10u);
+			v /= 10u;
+		} while (v > 0 && k < sizeof(d));
+
+		for (; n + k < 3u; n++) {
+			piece[n] = ' ';
+		}
+
+		while (k > 0) {
+			piece[n++] = d[--k];
+		}
+
+		piece[n++] = ' ';
+		piece[n++] = ' ';
+	}
+
+	int fd = (e->at < e->size) ? open(e->path, O_RDONLY, 0) : -1;
+	int got = 0;
+
+	if (e->at < e->size) {
+		got = -1;
+
+		if (fd >= 0 && lseek(fd, (off_t)e->at, SEEK_SET) == (off_t)e->at) {
+			got = read(fd, piece + n, max - n - 1u); /* and room for its '\n' */
+		}
+
+		close(fd);
+
+		/* not now (the heap is full): again later, for a while */
+		if (got <= 0 && ++e->tries < 200u) {
+			return LINES_LATER;
+		}
+	}
+
+	e->tries = 0;
+
+	if (got <= 0) {
+		/* the end: a long last line without '\n' still gets one */
+		if (e->mid) {
+			e->mid = false;
+			piece[0] = '\n';
+			return 1;
+		}
+
+		return 0;
+	}
+
+	const char *nl = memchr(piece + n, '\n', (size_t)got);
+
+	if (nl != NULL) {
+		got = (int)(nl - (piece + n)) + 1; /* up to its '\n' */
+		e->line++;
+		e->mid = false;
+	} else if ((unsigned int)got < max - n - 1u) {
+		piece[n + (unsigned int)got] = '\n'; /* the last line, without '\n' in the file */
+		e->at += (uint32_t)got;
+		e->mid = false;
+		e->line++;
+		return n + (unsigned int)got + 1u;
+	} else {
+		e->mid = true; /* the rest of it next time */
+	}
+
+	e->at += (uint32_t)got;
+
+	return n + (unsigned int)got;
+}
+
+static int ed_list(const char *path)
+{
+	int fd = open(path, O_RDONLY, 0);
+
+	if (fd < 0) {
+		printf("open failed\n");
+		return -1;
+	}
+
+	long end = (long)lseek(fd, 0, SEEK_END);
+
+	close(fd);
+
+	if (end < 0) {
+		printf("not a file\n");
+		return -1;
+	}
+
+	size_t length = strlen(path) + 1u;
+	ed_list_t *e = lines_alloc((unsigned int)(sizeof(ed_list_t) + length), ed_list_next);
+
+	if (e == NULL) {
+		return -1;
+	}
+
+	memcpy(e->path, path, length);
+	e->line = 1;
+	e->size = (uint32_t)end;
+
+	return lines_run("ed", &e->lines);
+}
+
 int vfs_ed(void *args, int argc, char *argv[])
 {
 	if (argc < 2 || strcmp(argv[1], "-help") == 0) {
 		return ed_usage();
+	}
+
+	if (argc == 2) {
+		return ed_list(argv[1]);
 	}
 
 	/* the new line: the words after the command, one space apart */
@@ -84,26 +215,6 @@ int vfs_ed(void *args, int argc, char *argv[])
 	}
 
 	int r = 0;
-
-	if (argc == 2) {
-		/* list */
-		if (fd < 0) {
-			printf("open failed\n");
-			r = -1;
-		}
-
-		for (long n = 1; n <= lines; n++) {
-			int a = ed_line(text, size, n);
-			int b = ed_line(text, size, n + 1);
-
-			int w = b - a - (text[b - 1] == '\n');
-
-			printf("%3ld  %.*s\n", n, w, text + a);
-		}
-
-		free(text);
-		return r;
-	}
 
 	char *op = NULL;
 	long n = strtol(argv[2], &op, 10);

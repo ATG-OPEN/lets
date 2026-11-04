@@ -11,6 +11,7 @@
 #include "../bin/kill.h"
 #include "../bin/tmp.h"
 #include "../bin/top.h"
+#include "../bin/lines.h"
 #include "../kernel/task.h"
 
 #include <unistd.h>
@@ -33,7 +34,7 @@ static int bin_bad(void)
  * d directory, - file (also a RAM file or a command), c device, b block
  * device; r / w / x from what the file or node can do.
  */
-static void bin_ls_long(const vfs_dirent_t *e)
+static unsigned int bin_ls_long(const vfs_dirent_t *e, char *line, unsigned int max)
 {
 	char mode[5] = "-rw-";
 
@@ -52,7 +53,80 @@ static void bin_ls_long(const vfs_dirent_t *e)
 		mode[3] = h->execute_handler ? 'x' : '-';
 	}
 
-	printf("%s %6lu %s\n", mode, (unsigned long)e->size, e->name);
+	int n = snprintf(line, max, "%s %6lu %s\n", mode, (unsigned long)e->size, e->name);
+
+	return (n < 0) ? 0 : ((unsigned int)n >= max) ? max - 1u : (unsigned int)n;
+}
+
+/*
+ * The entries of a directory, a line (ls -l) or a few names at a time
+ * (lines.h), so a stream that takes only a few packets at once gets them all.
+ */
+typedef struct {
+	lines_t lines;
+	uint16_t index; /* the next entry */
+	uint16_t count; /* entries shown so far */
+	uint8_t dir;
+	bool all, list, slash, done, ended;
+} bin_ls_t;
+
+static unsigned int bin_ls_next(lines_t *l, char *piece, unsigned int max)
+{
+	bin_ls_t *s = (bin_ls_t *)l;
+	unsigned int n = 0;
+	vfs_dirent_t e;
+
+	while (!s->done) {
+		uint16_t before = s->index;
+
+		if (vfs_dir_read(s->dir, &s->index, &e) != 0) {
+			s->done = true;
+			break;
+		}
+
+		/* commands are hidden, but /bin is where they are listed */
+		if (e.hidden && !s->all && s->dir != VFS_BIN) {
+			continue;
+		}
+
+		if (s->list) {
+			s->count++;
+			return bin_ls_long(&e, piece, max);
+		}
+
+		/* "  name/": the next names on one line, as many as the piece takes */
+		unsigned int w = (unsigned int)strlen(e.name);
+		unsigned int need = (s->count > 0 ? 2u : 0u) + w + (s->slash && e.kind == VFS_DIR) + 1u;
+
+		if (n + need > max) {
+			if (n > 0) {
+				s->index = before; /* this one starts the next piece */
+				return n;
+			}
+
+			w = max - 4u; /* a name longer than a piece: cut */
+		}
+
+		if (s->count++ > 0) {
+			piece[n++] = ' ';
+			piece[n++] = ' ';
+		}
+
+		memcpy(piece + n, e.name, w);
+		n += w;
+
+		if (s->slash && e.kind == VFS_DIR) {
+			piece[n++] = '/';
+		}
+	}
+
+	/* the end of the names' line */
+	if (!s->list && s->count > 0 && !s->ended) {
+		s->ended = true;
+		piece[n++] = '\n';
+	}
+
+	return n;
 }
 
 /* ls [-a] [-l] [-p | -F] [path] */
@@ -115,33 +189,32 @@ static int bin_ls(void *args, int argc, char *argv[])
 			}
 		}
 
-		bin_ls_long(&e);
+		char line[TFS_NAME_SIZE + 16];
+
+		bin_ls_long(&e, line, sizeof(line));
+		printf("%s", line);
 		return 1;
 	}
 
+	bin_ls_t *s = lines_alloc(sizeof(bin_ls_t), bin_ls_next);
+
+	if (s == NULL) {
+		return -1;
+	}
+
+	s->dir = p.dir;
+	s->all = all;
+	s->list = list;
+	s->slash = slash;
+
+	/* what it returns: how many entries it shows */
 	uint16_t index = 0;
 
 	while (vfs_dir_read(p.dir, &index, &e) == 0) {
-		/* commands are hidden, but /bin is where they are listed */
-		if (e.hidden && !all && p.dir != VFS_BIN) {
-			continue;
-		}
-
-		count++;
-
-		if (list) {
-			bin_ls_long(&e);
-		} else {
-			printf("%s%s%s", count > 1 ? "  " : "", e.name,
-			       (slash && e.kind == VFS_DIR) ? "/" : "");
-		}
+		count += !(e.hidden && !all && p.dir != VFS_BIN);
 	}
 
-	if (!list && count > 0) {
-		printf("\n");
-	}
-
-	return count;
+	return (lines_run("ls", &s->lines) < 0) ? -1 : count;
 }
 
 /* cd [path] */
@@ -236,6 +309,98 @@ static bool bin_has_end(int fd)
 	return vfs_file_is(fd) || tmp_file_size(vfs_fd_node(fd)) >= 0;
 }
 
+/*
+ * cat of a file: a piece at a time, read from the file each time (lines.h),
+ * so a stream that takes only a few packets at once gets all of it.
+ */
+typedef struct {
+	lines_t lines;
+	uint32_t at;
+	uint32_t size;
+	uint8_t tries; /* reads that failed in a row (a full heap: open() needs memory) */
+	char last;     /* the last byte written: a file without '\n' at its end gets one */
+	char path[];
+} bin_cat_t;
+
+static unsigned int bin_cat_next(lines_t *l, char *piece, unsigned int max)
+{
+	bin_cat_t *c = (bin_cat_t *)l;
+	int got = 0;
+
+	if (c->at < c->size) {
+		int fd = open(c->path, O_RDONLY, 0);
+
+		got = -1;
+
+		if (fd >= 0 && lseek(fd, (off_t)c->at, SEEK_SET) == (off_t)c->at) {
+			got = read(fd, piece, max);
+		}
+
+		close(fd);
+
+		/* not now (the heap is full): again later, for a while */
+		if (got <= 0 && ++c->tries < 200u) {
+			return LINES_LATER;
+		}
+	}
+
+	c->tries = 0;
+
+	if (got <= 0) {
+		if (c->last != '\n') {
+			c->last = '\n';
+			piece[0] = '\n';
+			return 1;
+		}
+
+		return 0;
+	}
+
+	/* a '\n' only at a piece's end */
+	const char *nl = memchr(piece, '\n', (size_t)got);
+
+	if (nl != NULL) {
+		got = (int)(nl - piece) + 1;
+	}
+
+	c->at += (uint32_t)got;
+	c->last = piece[got - 1];
+
+	return (unsigned int)got;
+}
+
+static int bin_cat_file(const char *path)
+{
+	int fd = open(path, O_RDONLY, 0);
+
+	if (fd < 0) {
+		printf("open failed\n");
+		return -1;
+	}
+
+	long end = (long)lseek(fd, 0, SEEK_END);
+
+	close(fd);
+
+	size_t length = strlen(path) + 1u;
+	bin_cat_t *c = lines_alloc((unsigned int)(sizeof(bin_cat_t) + length), bin_cat_next);
+
+	if (c == NULL) {
+		return -1;
+	}
+
+	memcpy(c->path, path, length);
+	c->last = '\n';
+	c->size = (end > 0) ? (uint32_t)end : 0u;
+
+	/* an empty file prints nothing, one with bytes ends in '\n' */
+	if (lines_run("cat", &c->lines) < 0) {
+		return -1;
+	}
+
+	return (end > 0) ? (int)end : 0;
+}
+
 /* cat [-x] path: a file to its end; a node with one read. No path: what stdin was sent to */
 static int bin_cat(void *args, int argc, char *argv[])
 {
@@ -252,6 +417,12 @@ static int bin_cat(void *args, int argc, char *argv[])
 	if (fd < 0) {
 		printf("open failed\n");
 		return -1;
+	}
+
+	/* a file (not a device, not stdin) as pieces that are never lost */
+	if (!in && !hex && bin_has_end(vfs_stream(fd))) {
+		close(fd);
+		return bin_cat_file(argv[argc - 1]);
 	}
 
 	char *buffer = malloc(BIN_BUFFER_SIZE);

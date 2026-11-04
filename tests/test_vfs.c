@@ -624,7 +624,8 @@ static void test_tree(void)
 	CHECK(system("crc boot.as") == 0);
 	CHECK(system("mv boot.as rc") == 0 && vfs_resolve("rc", &p) == 0 && p.kind == VFS_FILE);
 	CHECK(system("mv rc /tmp/rc") == -1); /* another file system: cp */
-	CHECK(system("cat rc") == 9);
+	CHECK(system("cat rc") == 9 && strcmp(capture("cat rc"), "replaced\n") == 0);
+	CHECK(write(1, "to the console\n", 15) == 15); /* stdout goes to the node `std` gave it */
 	CHECK(system("ls -l") == 1);
 	CHECK(system("ls /") == 5); /* bin dev app tmp mnt */
 	CHECK(system("cd /") == 0);
@@ -732,7 +733,7 @@ static void test_tree(void)
 
 	/* a copy that fails leaves the old file */
 	/* stdout reached the node it was sent to */
-	CHECK(strstr(sink, "replaced") != NULL);
+	CHECK(strstr(sink, "to the console") != NULL);
 
 	/* ls as on Linux: names only, -p marks the directories, -l the type and rwx */
 	CHECK(strcmp(capture("ls /"), "bin  dev  opt  tmp  mnt\n") == 0);
