@@ -30,9 +30,7 @@ board can be configured, tested and driven over a serial line without reflashing
   *argscript*, which runs the board's startup script `/boot/rc` (variables, `if`/`while`/`repeat`, `wait`, labels) for test and
   bring-up scripts.
 - **Libraries**: packet framing with CRC (`byte8`), chunked transfers (`ddata`), PID control,
-  ring queues, EMA and median filters, and portable signal / control code (plain C99, no
-  kernel needed): 2nd-order IIR filters in float and Q14 fixed point, pulse / return
-  detection, an avalanche-photodiode bias controller, a spiral search pattern.
+  ring queues, EMA and median filters, the device ID.
 - **Runs on a PC too**: the same sources build as a host program with a shell on your terminal,
   and every module has host tests.
 
