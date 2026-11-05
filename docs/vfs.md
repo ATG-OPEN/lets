@@ -346,7 +346,7 @@ part_init(&boot, &sf0.blk, 0, 65536);                   // partitions pass disca
 part_init(&home, &sf0.blk, 65536, 2097152 - 65536);
 ```
 
-`prj/DIRO6.X` (PIC24FJ256GB412) boots this way, with its shell on USB CDC.
+`drn_mcu_prj/DIRO6.X` (PIC24FJ256GB412) boots this way, with its shell on USB CDC.
 
 ## Size (XC16 2.10, -O1, PIC24FJ128GL306)
 

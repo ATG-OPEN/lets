@@ -90,4 +90,4 @@ LETS must run on 64 KB of program memory and 8 KB of RAM. A board sets what it n
 received by interrupts, with the direction pin of RS485 driven from the interrupt: see `opt/tty.h`.
 It owns its UARTs, so when MCC runs again it must leave them out, or `uartN.c` comes back and defines
 the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`. dsPIC33CK has
-another UART: `home/UDMP.X`, `home/CHARGER.X` and `prj/TIS40K.X` keep MCC's driver.
+another UART: `home/UDMP.X`, `home/CHARGER.X` and `drn_mcu_prj/TIS40K.X` keep MCC's driver.
