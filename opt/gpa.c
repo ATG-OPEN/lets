@@ -99,7 +99,7 @@ static int gpa_input_loop(void *args, uint64_t system_time)
 	gpa_input_t *g = args;
 	float value;
 
-	if (gpa_read(g->args, &value, 1) < 0)
+	if (gpa_read(g->args, &value, sizeof value) < 0)
 		return -1;
 
 	double elapsed_time = (double)(system_time - g->last_update_time) / 1000000;
@@ -143,7 +143,7 @@ static int gpa_output_loop(void *args, uint64_t system_time)
 	if (g->state > 0) {
 		float value = g->value[g->element];
 
-		if (gpa_write(g->args, &value, 1) < 0) {
+		if (gpa_write(g->args, &value, sizeof value) < 0) {
 			printf("-write error\n");
 			return -1;
 		}
@@ -200,7 +200,7 @@ int gpa_execute(void *args, int argc, char *argv[])
 
 			float value;
 
-			if (gpa_read(args, &value, 1) < 0) {
+			if (gpa_read(args, &value, sizeof value) < 0) {
 				printf("read error\n");
 				return -1;
 			}
