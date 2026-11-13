@@ -78,7 +78,7 @@ static int term_read(void *args, void *buffer, unsigned int length)
 
 static vfs_handler_t term_node = {.write_handler = sink_write, .read_handler = term_read};
 
-/* a port whose queue is full every other write, as a DRN port is: write() returns 0 */
+/* a port whose queue is full every other write, as a packet port's is: write() returns 0 */
 static char narrow[2048];
 static int ls_shown;
 static unsigned narrow_len;

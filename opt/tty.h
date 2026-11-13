@@ -64,7 +64,7 @@ typedef struct {
 	volatile uint16_t *pin; /**< LATx of the direction pin; NULL: none. */
 	uint16_t pin_mask;	/**< Its bit. */
 	tty_mode_t mode;
-	bool swap;		/**< A write of 0 bytes swaps 1 and 2 of the mode: see link.c in drn-router-mcu. */
+	bool swap;		/**< A write of 0 bytes swaps 1 and 2 of the mode: for a link protocol that switches its framing. */
 
 	volatile uint8_t tx_head; /* the next byte to send */
 	volatile uint8_t tx_tail; /* where a write puts the next byte */

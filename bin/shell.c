@@ -53,7 +53,7 @@
 
 /*
  * The echo goes to stderr: the same terminal as stdout, but not line buffered.
- * It is collected and written once per batch of keys: on a DRN port each write
+ * It is collected and written once per batch of keys: on a packet port each write
  * is a packet, and a burst of one-byte packets overflows the port's queue.
  */
 #ifndef SHELL_OUT_SIZE

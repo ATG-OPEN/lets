@@ -773,7 +773,7 @@ static void test_tree(void)
 	CHECK(vfs_boot("tfs", "boot0") == 0 && strcmp(capture("/boot/rc"), "edited\n") == 0);
 	CHECK(system("umount /boot") == 0 && vfs_boot("tfs", "nothing") == -1);
 
-	/* "one": a 256-byte EEPROM holding rc only, as on UDM */
+	/* "one": a 256-byte EEPROM holding rc only, as on a small PIC24 board */
 	static uint8_t ee_mem[256];
 	static ramdisk_t ee256;
 	const char *rc100 = "ttyS1 -b 9600\nnmac ttyS1 PRES HOST\nstd nmac\nmv di0 SLDO\nmv di1 SLDU\n"

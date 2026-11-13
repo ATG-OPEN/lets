@@ -5,8 +5,8 @@ alike are **nodes** in one table and are reached through the usual `open` / `rea
 `close` / `system` calls. A built-in **shell** and a tiny **script language** run on top, so a
 board can be configured, tested and driven over a serial line without reflashing.
 
-- **Made to fit**: LETS must run on 64 KB of program memory and 8 KB of RAM. `home/UDM.X`
-  (PIC24FJ64GP202) is the reference: a change that does not fit there does not go in.
+- **Made to fit**: LETS must run on 64 KB of program memory and 8 KB of RAM. A PIC24FJ64GP202
+  build is the reference: a change that does not fit there does not go in.
 - **Cooperative tasks**: 16 run-to-completion tasks (`-DTASKS_MAX_COUNT`); a task returns how
   long to sleep (ms). No stacks per task, no locks, nothing blocks. The scheduler feeds the
   watchdog, so a task that never returns resets the board.

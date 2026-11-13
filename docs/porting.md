@@ -76,13 +76,13 @@ RCONbits.SWDTEN = 1;
 tasks_start();
 ```
 
-After it fires, `top mem` shows bit 4 of RCON in `reset`. `home/DEMO.X` does this.
+After it fires, `top mem` shows bit 4 of RCON in `reset`.
 
 ## Limits
 
 LETS must run on 64 KB of program memory and 8 KB of RAM. A board sets what it needs with
-`TASKS_MAX_COUNT`, `MAX_BLOCK_COUNT`, `VFS_NODES_MAX` and `VFS_FDS_MAX`, and `home/UDM.X`
-(PIC24FJ64GP202) is the build to check against. `top mem` shows what a board really uses.
+`TASKS_MAX_COUNT`, `MAX_BLOCK_COUNT`, `VFS_NODES_MAX` and `VFS_FDS_MAX`, and a PIC24FJ64GP202
+build is the one to check against. `top mem` shows what a board really uses.
 
 ## UART
 
@@ -90,4 +90,4 @@ LETS must run on 64 KB of program memory and 8 KB of RAM. A board sets what it n
 received by interrupts, with the direction pin of RS485 driven from the interrupt: see `opt/tty.h`.
 It owns its UARTs, so when MCC runs again it must leave them out, or `uartN.c` comes back and defines
 the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`. dsPIC33CK has
-another UART: `home/UDMP.X`, `home/CHARGER.X` and `drn_mcu_prj/TIS40K.X` keep MCC's driver.
+another UART: projects on it keep MCC's driver.

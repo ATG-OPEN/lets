@@ -9,7 +9,7 @@ table it grew from, which is gone.)
 /
 ├── bin/    the system's commands: ls, cd, mount, top, std, ed, as, ... (vfs_register_app("ls", ...))
 ├── dev/    devices: every plain node that can be read or written (ttyS1, led1, ain1, lcd, ee0, ...)
-├── opt/    every other application: drn-fs, link, trg, pid, ... (vfs_register_app("/opt/trg", ...))
+├── opt/    every other application: link, trg, pid, ... (vfs_register_app("/opt/trg", ...))
 ├── tmp/    RAM files (touch), or a file system on SPI SRAM / a RAM disk mounted over it
 ├── mnt/    mounted file systems: /mnt/ee on the SPI EEPROM (configs, scripts, firmware images)
 ├── boot/   (a mount) the startup script, rc
@@ -28,7 +28,7 @@ in the home), `ls` lists plain names (`ls -p` marks the directories, `ls -l` sho
 | always too | `vfs/bin.c`: the built-in commands in flash, `ls cat echo rm mv touch cd pwd mkdir cp mount umount df date uptime std kill top shell` (+ `crc mkfs` with tfs), the prompt, Tab on paths; `bin/date.c` the system time |
 | with tfs | `vfs/tfs.c`, `vfs/tfsvfs.c` (tfs as the mount type "tfs"), drivers from `vfs/dev/`, optionally `vfs/ed.c` |
 | a tiny `/boot` | `vfs/onefs.c`: the mount type "one", one file (rc) on a memory too small for tfs |
-| `-DVFS_NO_TFS` | no tfs: for a small MCU with no memory to keep files on. Mounts of other types (the DRN router) still work; `VFS_DIRS_MAX` is 6 |
+| `-DVFS_NO_TFS` | no tfs: for a small MCU with no memory to keep files on. Mounts of other types (a project's own) still work; `VFS_DIRS_MAX` is 6 |
 | `-DVFS_NODES_MAX=n` | the node table: 24 entries of 22 bytes on a PIC24, for devices, RAM files and commands of a project |
 | `-DVFS_FDS_MAX=n` | handles open at the same time, devices and files: 8 of 10 bytes |
 
@@ -48,19 +48,18 @@ in the home), `ls` lists plain names (`ls -p` marks the directories, `ls -l` sho
 
 A file system is mounted by its type, as on Linux: a `vfs_fs_type_t` (mount, info, dir, open,
 read, write, seek, close, remove, rename, usage, source) registered with `vfs_fs_register()`.
-`vfs_initialize()` registers tfs; other types register themselves, such as the DRN router file
-system (drnfs, in the private drn repository):
+`vfs_initialize()` registers tfs; other types register themselves (a
+project's own):
 
 ```text
-mount -t drn router /drn        the DRN router at /drn: a port is a file, /drn/.N its config
 mount ee0 /mnt/ee               tfs on a block device (-t tfs is the default)
 mount -f sram0 /tmp             tfs, formatted if the device holds none
 df                              Device, Type, Size, Used, Avail, Mounted on
 ```
 
 - A name that starts with `.` is hidden: `ls -a` shows it.
-- `std` takes a file of a mounted file system as well as a node (`std /drn/250`: the shell over
-  DRN); the file stays open while it is the standard streams.
+- `std` takes a file of a mounted file system as well as a node (`std /net/shell`: the shell over
+  a packet port); the file stays open while it is the standard streams.
 - A read that returns 0 means nothing (yet); a write that returns 0 means not now, try later.
 
 ## How every board boots
@@ -88,7 +87,7 @@ std ttyS1
 ```
 
 a console on ttyS1 to write the board's own rc from (`ed /boot/rc ...`). An rc that is there
-stays as it is; it holds all of the board's setup, the shell's port too (`std /drn/250`). If the
+stays as it is; it holds all of the board's setup, the shell's port too (`std ttyS1`). If the
 memory does not answer, `vfs_boot()` runs those two lines itself.
 
 `/boot/rc` is run by argscript (`vfs_interpreter_set(argscript_execute)`): the file is read
@@ -286,7 +285,7 @@ vfs_mount("nv1", "/home", true);
 - `noload` keeps the pages out of the hex. Program with `ipecmd ... -OP14800-157FF` (in MPLAB X:
   "Preserve Program Memory", range 14800-157ff) so that a firmware update keeps the files.
 
-`home/DEMO.X` (PIC24FJ128GL306) boots this way, and its apps have no C code: they are scripts.
+A PIC24FJ128GL306 demo board boots this way, and its apps have no C code: they are scripts.
 `apps/nvfs.c` installs them on a new board and leaves existing ones as they are:
 
 ```text
@@ -346,7 +345,7 @@ part_init(&boot, &sf0.blk, 0, 65536);                   // partitions pass disca
 part_init(&home, &sf0.blk, 65536, 2097152 - 65536);
 ```
 
-`drn_mcu_prj/DIRO6.X` (PIC24FJ256GB412) boots this way, with its shell on USB CDC.
+A PIC24FJ256GB412 board boots this way, with its shell on USB CDC.
 
 ## Size (XC16 2.10, -O1, PIC24FJ128GL306)
 
@@ -358,7 +357,7 @@ part_init(&home, &sf0.blk, 65536, 2097152 - 65536);
 | `vfs/bin.c` (21 commands, prompt, Tab) | 4.3 KB | - |
 | `vfs/dev/flash24.c` / `part.c` | 1.5 / 0.2 KB | - |
 | `vfs/dev/ee25.c` / `sram23.c` / `ramdisk.c` | 0.7 / 0.45 / 0.2 KB | - |
-| `vfs/dev/sst25.c` | 2.4 KB (DIRO6.X) | - |
+| `vfs/dev/sst25.c` | 2.4 KB | - |
 
 Build with `-DTFS_NO_CHECK` to drop the repair at mount.
 

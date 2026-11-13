@@ -30,9 +30,9 @@
  * and files alike, so neither takes a node. The built-in commands are in flash
  * (vfs_commands), listed in /bin, and take no node either.
  *
- * File systems are mounted by type, as on Linux (`mount -t drn router /drn`):
+ * File systems are mounted by type, as on Linux (`mount -t TYPE SOURCE DIR`):
  * a type is a vfs_fs_type_t registered with vfs_fs_register(). tfs (SPI
- * memories, flash) is built in; the DRN router file system is another.
+ * memories, flash) is built in; a project can register its own.
  *
  * Build options: VFS_NODES_MAX sets the size of the node table (24),
  * VFS_FDS_MAX the handles (8);
@@ -121,7 +121,7 @@ vfs_node_t *vfs_nodes_get(void);
  */
 int vfs_node_new(const char *name, bool hidden, void *args, const vfs_handler_t *handlers);
 
-/** @brief The `std` command: std [-t] PATH makes a node or a file (a DRN port) the console. */
+/** @brief The `std` command: std [-t] PATH makes a node or a file (a port of a packet link) the console. */
 int vfs_std_execute(void *args, int argc, char *argv[]);
 
 /** @brief The handle of the console, -1 when there is none. */
@@ -283,7 +283,7 @@ typedef struct {
  * optional may be NULL. Flags are open()'s (O_WRONLY, O_CREAT, ...).
  */
 typedef struct vfs_fs_type {
-	const char *name; /**< `mount -t` name: "tfs", "drn". */
+	const char *name; /**< `mount -t` name: "tfs", "one". */
 	/** Mounts @p source (a device, or whatever the type understands); the file system or NULL. */
 	void *(*mount)(const char *source, bool format);
 	/** Releases what mount() took; the files are closed. */

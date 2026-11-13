@@ -3,7 +3,7 @@
 
 /*
  * See top.h. The lines are written by a task of their own, one at a time and
- * straight to the console handle: a DRN port takes only so many packets (one
+ * straight to the console handle: a packet port takes only so many packets (one
  * per line) before its queue is full and a write returns 0. Then the line is
  * kept and written again on the next call, so no line is lost however many
  * tasks there are. The shell waits for the task (shell_wait()), so the prompt
@@ -24,7 +24,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define TOP_LINE_SIZE 96u /* a line and its end, well inside a DRN payload */
+#define TOP_LINE_SIZE 96u /* a line and its end, well inside a small packet */
 
 enum { TOP_UPTIME, TOP_MEMORY, TOP_HEADER, TOP_TASKS };
 

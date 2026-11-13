@@ -21,7 +21,7 @@
  * long its last call took, the longest call so far (what the others had to
  * wait), the time between its last two calls, and its share of the time.
  *
- * A task of its own writes the lines, one at a time: on a DRN port, whose queue
+ * A task of its own writes the lines, one at a time: on a packet port, whose queue
  * takes only so many packets, a line waits until there is room, so none is
  * lost. The shell waits for it before the next prompt (Ctrl-C stops it).
  * `top mem` prints the heap blocks instead (see alloc_info()).
