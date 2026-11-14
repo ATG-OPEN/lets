@@ -11,6 +11,14 @@
 #include "../kernel/alloc.h"
 #include "../bin/shell.h"
 #include "../bin/date.h"
+
+/* a clock the test moves (0: as without one, before the date test) */
+static uint64_t fake_us;
+
+static uint64_t fake_clock(void)
+{
+	return fake_us;
+}
 #include "../lib/args.h"
 #include "../vfs/vfs.h"
 #include "../vfs/vfs.h"
@@ -894,6 +902,36 @@ static void test_tree(void)
 		CHECK(read(dfd, buf, 20) == 20 && close(dfd) == 0);
 		CHECK(strncmp(buf, "2030-01-02 03:04:0", 18) == 0 && buf[19] == '\n');
 		CHECK(strncmp(capture("uptime"), "up 0 days 00:", 13) == 0);
+
+		/* µs, step, slew (never backwards, 500 µs a second), rate */
+		task_initialize(fake_clock);
+		fake_us = 1000000ull;
+		date_set_us(1794744000000000ull);
+		CHECK(date_now_us() == 1794744000000000ull && date_now() == 1794744000ul);
+		fake_us += 2000000ull;
+		CHECK(date_now_us() == 1794744002000000ull);
+		date_adjust_us(-1000);		/* 1 ms back: takes 2 s */
+		uint64_t prev = date_now_us();
+		int monotonic = 1;
+		for (int i = 0; i < 40; i++) {
+			fake_us += 100000ull;
+			uint64_t n = date_now_us();
+			monotonic &= n > prev;
+			prev = n;
+		}
+		CHECK(monotonic && date_now_us() == 1794744006000000ull - 1000ull && date_pending_us() == 0);
+		date_adjust_us(250);
+		fake_us += 100000ull;		/* 50 µs of it so far */
+		CHECK(date_now_us() == 1794744006100000ull - 1000ull + 50ull && date_pending_us() == 200);
+		fake_us += 1000000ull;
+		CHECK(date_pending_us() == 0);
+		date_set_rate_ppb(100000);	/* +100 ppm */
+		uint64_t a = date_now_us();
+		fake_us += 3600000000ull;	/* an hour: re-anchored on the way */
+		CHECK(date_now_us() - a == 3600000000ull + 360000ull && date_rate_ppb() == 100000);
+		date_set_rate_ppb(0);
+		CHECK(strcmp(capture("date +%s.%N"), "1794747607.459250\n") == 0);
+		fake_us = 0;			/* as before: no clock */
 	}
 
 	/* ed: one line per command */

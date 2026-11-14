@@ -9,7 +9,13 @@
 
 /**
  * @file date.h
- * @brief System time: UTC, as seconds since 1970, in step with the kernel's clock.
+ * @brief System time: UTC, as seconds (or µs) since 1970, in step with the kernel's clock.
+ *
+ * Under it is the kernel's µs clock, with a rate correction (the oscillator's measured error,
+ * ppb) and a slew: an offset that goes in at most 500 µs a second, so the time never jumps or
+ * runs backwards for small corrections. A network time service steps it (date_set_us()) when it
+ * is far off, slews it (date_adjust_us()) when it is close, and corrects its rate
+ * (date_set_rate_ppb()) from successive syncs.
  *
  * It starts at 0 and counts from then, so until someone sets it, it reads as
  * the time since reset. Nothing keeps it across a reset. It is set by the
@@ -19,12 +25,31 @@
  *     date                            2026-11-01 12:00:00
  *     date -s "2026-11-01 12:00:00"
  *     date +%s                        1793534400
+ *     date +%s.%N                     1793534400.123456
  *     echo 2026-11-01 12:00:00 > date
  *     uptime                          up 3 days 02:14:07
  */
 
 /** @brief Seconds since 1970, UTC. */
 uint32_t date_now(void);
+
+/** @brief µs since 1970, UTC (since reset until it is set). */
+uint64_t date_now_us(void);
+
+/** @brief Sets the time, µs since 1970 (a step). */
+void date_set_us(uint64_t us);
+
+/** @brief Moves the time by @p delta µs, slewed (at most 500 µs a second). */
+void date_adjust_us(int64_t delta);
+
+/** @brief The part of the slews not applied yet, µs. */
+int64_t date_pending_us(void);
+
+/** @brief Sets the rate correction of the kernel's clock, ppb (+: the clock runs slow). */
+void date_set_rate_ppb(int32_t ppb);
+
+/** @brief The rate correction, ppb. */
+int32_t date_rate_ppb(void);
 
 /** @brief Sets the time. */
 void date_set(uint32_t seconds);

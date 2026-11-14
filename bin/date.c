@@ -15,23 +15,110 @@
 #define DATE_DAY  86400ul	/* seconds */
 #define DATE_MAX_YEAR 2105	/* seconds since 1970 fit 32 bits up to here */
 
-static uint32_t date_base; /* the time at reset */
+#define DATE_SLEW_PPM 500		/* a slew moves the clock at most this fast */
+#define DATE_ANCHOR_US 0x40000000ull	/* re-anchored after this long (~18 min): small products */
+
+/*
+ * The time is counted from an anchor: what the kernel's clock read then (up0) and the time it
+ * was (utc0), both in µs. Since then it runs at the kernel's rate corrected by date_rate (ppb),
+ * and a slew still to be applied (date_slew) goes in at DATE_SLEW_PPM.
+ */
+static uint64_t date_up0;
+static uint64_t date_utc0;
+static int32_t date_rate;
+static int64_t date_slew;
 static bool date_valid;
+
+/* the time at kernel time @p up, and in @p slewed how much of the slew is in it */
+static uint64_t date_at(uint64_t up, int64_t *slewed)
+{
+	uint64_t dt = up - date_up0;
+	int64_t corr = (int64_t)dt * date_rate / 1000000000ll;
+	int64_t most = (int64_t)(dt / (1000000ull / DATE_SLEW_PPM));
+	int64_t s = date_slew;
+
+	if (s > most) {
+		s = most;
+	} else if (s < -most) {
+		s = -most;
+	}
+
+	*slewed = s;
+
+	return date_utc0 + dt + (uint64_t)(corr + s);
+}
+
+/* moves the anchor to now */
+static uint64_t date_anchor(void)
+{
+	uint64_t up = task_get_system_time();
+	int64_t s;
+	uint64_t now = date_at(up, &s);
+
+	date_up0 = up;
+	date_utc0 = now;
+	date_slew -= s;
+
+	return now;
+}
 
 uint32_t date_uptime(void)
 {
 	return (uint32_t)(task_get_system_time() / 1000000ull);
 }
 
+uint64_t date_now_us(void)
+{
+	uint64_t up = task_get_system_time();
+	int64_t s;
+
+	if (up - date_up0 >= DATE_ANCHOR_US) {
+		return date_anchor();
+	}
+
+	return date_at(up, &s);
+}
+
 uint32_t date_now(void)
 {
-	return date_base + date_uptime();
+	return (uint32_t)(date_now_us() / 1000000ull);
+}
+
+void date_set_us(uint64_t us)
+{
+	date_up0 = task_get_system_time();
+	date_utc0 = us;
+	date_slew = 0;
+	date_valid = true;
 }
 
 void date_set(uint32_t seconds)
 {
-	date_base = seconds - date_uptime();
-	date_valid = true;
+	date_set_us((uint64_t)seconds * 1000000ull);
+}
+
+void date_adjust_us(int64_t delta)
+{
+	date_anchor();
+	date_slew += delta;
+}
+
+int64_t date_pending_us(void)
+{
+	date_anchor();
+
+	return date_slew;
+}
+
+void date_set_rate_ppb(int32_t ppb)
+{
+	date_anchor();
+	date_rate = ppb;
+}
+
+int32_t date_rate_ppb(void)
+{
+	return date_rate;
 }
 
 bool date_is_set(void)
@@ -191,13 +278,20 @@ int date_execute(void *args, int argc, char *argv[])
 		return 0;
 	}
 
+	if (argc == 2 && strcmp(argv[1], "+%s.%N") == 0) {
+		uint64_t us = date_now_us();
+
+		printf("%lu.%06lu\n", (unsigned long)(us / 1000000ull), (unsigned long)(us % 1000000ull));
+		return 0;
+	}
+
 	if (argc == 3 && strcmp(argv[1], "-s") == 0 && date_parse(argv[2], &seconds) == 0) {
 		date_set(seconds);
 		return 0;
 	}
 
 	if (argc != 1) {
-		printf("usage: date [+%%s] [-s \"YYYY-MM-DD hh:mm:ss\"]\n");
+		printf("usage: date [+%%s | +%%s.%%N] [-s \"YYYY-MM-DD hh:mm:ss\"]\n");
 		return -1;
 	}
 
