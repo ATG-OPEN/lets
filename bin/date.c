@@ -105,9 +105,11 @@ void date_adjust_us(int64_t delta)
 
 int64_t date_pending_us(void)
 {
-	date_anchor();
+	int64_t s;
 
-	return date_slew;
+	date_at(task_get_system_time(), &s);
+
+	return date_slew - s;
 }
 
 void date_set_rate_ppb(int32_t ppb)
