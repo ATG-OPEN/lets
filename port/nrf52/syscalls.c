@@ -2,12 +2,14 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * newlib's ends (--specs=nano.specs): what newlib's own printf / puts / fputs write goes to the
- * console tty (nrf52_console, set by the board); the kernel's k_printf uses it when a task has
- * no stdout of its own. Everything else (open, read, ...) is the kernel's under k_* names
- * (port/cortex-m/prelude.h): these stubs only satisfy newlib.
+ * newlib's ends (--specs=nano.specs): what newlib's own printf / puts / putchar / fputs write to
+ * stdout or stderr goes where the kernel's write(1) goes, the running task's stdout or else the
+ * console set by `std`; only with neither does it go to the board's tty (nrf52_console, set by
+ * the board), as the kernel's k_printf. Everything else (open, read, ...) is the kernel's under
+ * k_* names (port/cortex-m/prelude.h): these stubs only satisfy newlib.
  */
 #include "nrf52.h"
+#include "../../vfs/vfs.h"
 
 #include <errno.h>
 #include <stddef.h>
@@ -18,7 +20,9 @@ nrf52_tty_t *nrf52_console;
 
 int _write(int fd, const char *buf, int len)
 {
-	(void)fd;
+	if ((fd == 1 || fd == 2) && len > 0 && vfs_stream(fd) >= 0) {
+		return k_write(fd, (void *)buf, (unsigned int)len);
+	}
 	if (nrf52_console != NULL && len > 0) {
 		nrf52_tty_put(nrf52_console, buf, (unsigned int)len);
 	}

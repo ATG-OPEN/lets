@@ -8,7 +8,8 @@
  * newlib owns the names open / read / write / close / lseek / system / malloc / free, so its
  * headers are read first under their real names and the kernel's are renamed k_*: every
  * program built with this prelude (the kernel, the libraries, the apps) calls the kernel's.
- * newlib's own printf and puts end in _write() (port/nrf52/syscalls.c): the console's tty.
+ * newlib's own puts / putchar / fputs end in _write() (port/<chip>/syscalls.c): the running
+ * task's stdout, else the console set by `std`, else the board's tty.
  * The kernel sources stay unchanged.
  */
 #ifndef PORT_CORTEX_M_PRELUDE_H

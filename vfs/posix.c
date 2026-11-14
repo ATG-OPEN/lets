@@ -455,7 +455,10 @@ int __attribute__((__section__(".libc.system"))) system(const char *input)
 }
 
 #if !defined(__XC16__)
-/* a PC's printf is not ours: send it where the kernel's would go, when that is not the console */
+/*
+ * The C library's printf is not ours: send the text where write(1) goes, the task's stdout or
+ * else the console set by `std`. Only with neither does it take the C library's own stdout.
+ */
 int k_printf(const char *format, ...)
 {
 	char text[256];
@@ -467,7 +470,7 @@ int k_printf(const char *format, ...)
 
 	va_end(list);
 
-	if (task_streams()->out >= 0 && n > 0) {
+	if (vfs_stream(1) >= 0 && n > 0) {
 		return write(1, text, (unsigned int)((n < (int)sizeof(text)) ? n : (int)sizeof(text) - 1));
 	}
 

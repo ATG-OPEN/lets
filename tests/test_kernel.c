@@ -18,12 +18,12 @@
 ALLOC_INIT_HEAP(8192);
 
 static int failures;
-#define CHECK(c)                                                            \
-	do {                                                                \
-		if (!(c)) {                                                 \
-			printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-			failures++;                                         \
-		}                                                           \
+#define CHECK(c)                                                                     \
+	do {                                                                         \
+		if (!(c)) {                                                          \
+			fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
+			failures++;                                                  \
+		}                                                                    \
 	} while (0)
 
 static uint64_t now_us(void)
@@ -284,6 +284,14 @@ static int checks(void *args, uint64_t t)
 		CHECK(write(1, "line one\n", 9) == 9);
 		CHECK(strcmp(sink, "line one\n") == 0);
 
+		/* printf of a task with no stdout of its own follows the console set by `std`
+		 * too, not the C library's stdout */
+		CHECK(task_streams()->out < 0);
+		sink_len = 0;
+		sink[0] = '\0';
+		CHECK(printf("printf %d\n", 2) == 9);
+		CHECK(strcmp(sink, "printf 2\n") == 0);
+
 		/* `std -t`: a person on a terminal - echo, editing, Tab, history, "\r\n" */
 		CHECK(vfs_node_create("term", false, NULL, &term_node) >= 0);
 		CHECK(system("std -t term") == 0 && vfs_terminal());
@@ -326,7 +334,7 @@ static int checks(void *args, uint64_t t)
 		return 0;
 	}
 	if (step == 2) {
-		/* the commands (their messages go to the PC's stdout here) */
+		/* the commands (their messages go to the console, sink, here) */
 		vfs_register_app("kill", kill);
 		vfs_register_app("top", top);
 		vfs_bin_initialize(); /* ls, cat, echo, mv, touch, rm, ... */

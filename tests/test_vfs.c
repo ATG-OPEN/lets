@@ -24,12 +24,12 @@
 ALLOC_INIT_HEAP(8192);
 
 static int failures;
-#define CHECK(c)                                                            \
-	do {                                                                \
-		if (!(c)) {                                                 \
-			printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
-			failures++;                                         \
-		}                                                           \
+#define CHECK(c)                                                                     \
+	do {                                                                         \
+		if (!(c)) {                                                          \
+			fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); \
+			failures++;                                                  \
+		}                                                                    \
 	} while (0)
 
 /* -------------------------------------------------------------------------- */
@@ -458,25 +458,23 @@ static int cmd_probe(void *args, int argc, char *argv[])
 	return 7;
 }
 
-/* what a command prints with printf (the PC's stdout here) */
+/* what a command prints with printf: the console `std` gave, ttyS1 (the sink) here; what the
+ * sink held before is kept */
 static const char *capture(const char *command)
 {
 	static char text[512];
-	static int saved = -1; /* the real stdout, kept (close() is the kernel's here) */
-	FILE *f = tmpfile();
+	static char kept[sizeof(sink)];
+	unsigned kept_len = sink_len;
 
-	if (saved < 0)
-		saved = dup(1);
-
-	fflush(stdout);
-	dup2(fileno(f), 1);
+	memcpy(kept, sink, sizeof(sink));
+	sink_len = 0;
+	sink[0] = '\0';
 	system(command);
-	fflush(stdout);
-	dup2(saved, 1);
-	rewind(f);
-	size_t n = fread(text, 1, sizeof(text) - 1, f);
-	text[n] = '\0';
-	fclose(f);
+	vfs_stdout_flush();
+	strncpy(text, sink, sizeof(text) - 1);
+	text[sizeof(text) - 1] = '\0';
+	memcpy(sink, kept, sizeof(sink));
+	sink_len = kept_len;
 	return text;
 }
 
