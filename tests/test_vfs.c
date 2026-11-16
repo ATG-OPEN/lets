@@ -29,6 +29,8 @@ static uint64_t fake_clock(void)
 #include "../vfs/dev/part.h"
 #include "../vfs/dev/sst25.h"
 
+#include <time.h> /* the C library's calendar, to check date_format() against */
+
 ALLOC_INIT_HEAP(8192);
 
 static int failures;
@@ -893,6 +895,21 @@ static void test_tree(void)
 			date_format(s, text);
 			CHECK(date_parse(text, &t) == 0 && t == s);
 		}
+
+		/* steps of a day and an hour to 2106, against the C library's calendar */
+		bool same = true;
+
+		for (uint64_t s = 0; s <= 0xFFFFFFFFull; s += 86400ull + 3661ull) {
+			char ref[32];
+			time_t tt = (time_t)s;
+
+			strftime(ref, sizeof(ref), "%Y-%m-%d %H:%M:%S", gmtime(&tt));
+			date_format((uint32_t)s, text);
+			same = same && strcmp(text, ref) == 0;
+		}
+
+		date_format(0xFFFFFFFFul, text);
+		CHECK(same && strcmp(text, "2106-02-07 06:28:15") == 0);
 
 		CHECK(!date_is_set() && strstr(capture("date"), "(not set)") != NULL);
 		CHECK(system("date -s \"2026-11-01 12:00:00\"") == 0 && date_is_set());

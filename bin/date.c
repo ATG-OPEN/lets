@@ -129,27 +129,52 @@ bool date_is_set(void)
 }
 
 /*
- * Days from 1970-03-01 stand on years that start in March, so that the leap day
- * is the last day of a year: 153 days for each 5 months is what the months of
- * March to January add up to, and February needs no case of its own.
+ * Calendar days by counting: whole years from 1970, then whole months. Up to 2106 (32-bit seconds)
+ * a year divisible by 4 is a leap year, except 2100. Counting is less code than the division
+ * formulas on a 16-bit chip, and at most 136 + 11 steps.
  */
+static unsigned int date_days(unsigned int year, unsigned int month)
+{
+	if (month == 0u) {
+		return ((year & 3u) == 0u && year != 2100u) ? 366u : 365u; /* the whole year */
+	}
+
+	if (month == 2u) {
+		return 28u + (date_days(year, 0) - 365u);
+	}
+
+	return 30u + ((month + (month >> 3)) & 1u); /* 31: Jan, Mar, May, Jul, Aug, Oct, Dec */
+}
+
 void date_format(uint32_t seconds, char *text)
 {
-	uint32_t days = seconds / DATE_DAY + 719468ul; /* from 0000-03-01 */
-	unsigned int rest = (unsigned int)(seconds % DATE_DAY / 60u);
+	unsigned int days = (unsigned int)(seconds / DATE_DAY);
+	unsigned int minutes = (unsigned int)(seconds % DATE_DAY / 60u);
+	unsigned int year = 1970u;
+	unsigned int month = 1u;
 
-	uint32_t era = days / 146097ul;			/* 400 years */
-	uint32_t day = days - era * 146097ul;
-	uint32_t y = (day - day / 1460ul + day / 36524ul - day / 146096ul) / 365ul;
-	uint32_t yday = day - (365ul * y + y / 4ul - y / 100ul);
-	uint32_t m = (5ul * yday + 2ul) / 153ul;
+	while (days >= date_days(year, 0)) {
+		days -= date_days(year++, 0);
+	}
 
-	unsigned int d = (unsigned int)(yday - (153ul * m + 2ul) / 5ul + 1ul);
-	unsigned int month = (unsigned int)((m < 10ul) ? m + 3ul : m - 9ul);
-	unsigned int year = (unsigned int)(y + era * 400ul + (month <= 2u ? 1ul : 0ul));
+	while (days >= date_days(year, month)) {
+		days -= date_days(year, month++);
+	}
 
-	snprintf(text, DATE_TEXT, "%04u-%02u-%02u %02u:%02u:%02u", year, month, d, rest / 60u, rest % 60u,
-		(unsigned int)(seconds % 60u));
+	/*
+	 * Each field is in its range here (year < 2107, the others 2 digits), so the text is 19
+	 * characters; the compiler cannot see that and would warn of a cut (the % that would show it
+	 * costs code on a small chip).
+	 */
+#if defined(__GNUC__) && __GNUC__ >= 7
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+#endif
+	snprintf(text, DATE_TEXT, "%04u-%02u-%02u %02u:%02u:%02u", year, month, days + 1u, minutes / 60u,
+		 minutes % 60u, (unsigned int)(seconds % 60u));
+#if defined(__GNUC__) && __GNUC__ >= 7
+#pragma GCC diagnostic pop
+#endif
 }
 
 /* the number at *@p text, -1 if there is none */
@@ -221,10 +246,15 @@ int date_parse(const char *text, uint32_t *seconds)
 	}
 
 	/* as date_format(), the other way */
-	uint32_t ym = (uint32_t)((m <= 2) ? y - 1 : y);
-	uint32_t mp = (uint32_t)((m > 2) ? m - 3 : m + 9);
-	uint32_t days = 365ul * ym + ym / 4ul - ym / 100ul + ym / 400ul +
-			(153ul * mp + 2ul) / 5ul + (uint32_t)d - 1ul - 719468ul;
+	uint32_t days = (uint32_t)d - 1u;
+
+	for (unsigned int i = 1970u; i < (unsigned int)y; i++) {
+		days += date_days(i, 0);
+	}
+
+	for (unsigned int i = 1u; i < (unsigned int)m; i++) {
+		days += date_days((unsigned int)y, i);
+	}
 
 	*seconds = days * DATE_DAY + (uint32_t)hour * 3600ul + (uint32_t)minute * 60ul +
 		   (uint32_t)second;
