@@ -172,6 +172,20 @@ void vfs_stdout_flush(void);
 #define VFS_FDS_MAX 8u /**< Handles open at the same time, devices and files: a project can set its own. */
 #endif
 #define VFS_FD_FIRST 3 /**< The first handle: 0, 1 and 2 are the task's streams. */
+
+/**
+ * Stack system() wants left for a command, or it refuses it ("too deep") rather than overflow
+ * (a reset): a printf() alone takes up to 350 B on a PIC24. Checked on XC16, where one stack
+ * of under 1 KB is shared by everything; 0 turns the check off.
+ */
+#ifndef VFS_SYSTEM_STACK
+#if defined(__XC16__)
+#define VFS_SYSTEM_STACK 384u
+#else
+#define VFS_SYSTEM_STACK 0u
+#endif
+#endif
+
 #ifndef VFS_HOME
 #define VFS_HOME "/home" /**< `cd` with no argument, `~` in the prompt, scripts run by name. */
 #endif

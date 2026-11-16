@@ -65,6 +65,11 @@ Tasks never block or busy-wait; keep each call short.
   more memory the task owns; plain `malloc` is for what outlives it.
 - Allocate a task's state in its `*_execute` function and hand it over with
   `task_create`. Free it yourself if `task_create` fails.
+- All tasks share one stack: on a PIC24 what the data leaves of 8 KB (720 B on a full board),
+  and a `printf()` alone takes up to 350 B of it. `system()` refuses a command when less than
+  `VFS_SYSTEM_STACK` (384 B, XC16 only) is left, with `too deep`, rather than overflow (a
+  reset): a command run from inside a command inside a command. `top mem` shows the most
+  stack used since start-up. Keep large buffers off the stack of what commands call.
 
 ## Nodes
 

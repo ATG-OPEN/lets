@@ -688,8 +688,8 @@ static void shell_lines(bool all)
 	}
 }
 
-/* one poll of the shell */
-static int shell_poll(void *args)
+/* one poll of the shell (inlined in shell_loop(): a call frame less under every command) */
+static inline __attribute__((always_inline)) int shell_poll(void *args)
 {
 	if (args != NULL) {
 		shell = args;

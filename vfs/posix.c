@@ -23,6 +23,10 @@
 #include <stdio.h>
 #include <stdarg.h>
 
+#if defined(__XC16__)
+#include <xc.h> /* SPLIM: the end of the stack */
+#endif
+
 /* -------------------------------------------------------------------------- */
 
 #define POSIX_STDOUT_SIZE 128u /* stdout line buffer */
@@ -369,13 +373,18 @@ static int posix_run_script(const char *name, bool found)
 		return posix_interpreter(NULL, 3, run);
 	}
 
-	printf(found ? "not executive\n" : "not found\n");
+	/* constant texts: XC16 makes them puts(), far less stack than printf() */
+	if (found) {
+		printf("not executive\n");
+	} else {
+		printf("not found\n");
+	}
 
 	return -1;
 }
 
-/* runs the command in posix_system_string */
-static int posix_run(void)
+/* runs the command in posix_system_string (inlined: one call frame less under every command) */
+static inline __attribute__((always_inline)) int posix_run(void)
 {
 	char *argv[POSIX_ARGS_MAX];
 
@@ -414,6 +423,22 @@ int __attribute__((__section__(".libc.system"))) system(const char *input)
 	if (input == NULL) {
 		return -1;
 	}
+
+	/*
+	 * A command run from inside a command, and so on, would end in a stack overflow (a reset on
+	 * a PIC24): with less than VFS_SYSTEM_STACK left it is refused, while there is still stack
+	 * for the message. The stack grows up to SPLIM.
+	 */
+#if VFS_SYSTEM_STACK > 0
+	uint16_t sp;
+
+	__asm__ volatile("mov w15, %0" : "=r"(sp));
+
+	if (sp + VFS_SYSTEM_STACK > SPLIM) {
+		printf("too deep\n");
+		return -1;
+	}
+#endif
 
 	/* a copy: args_parse() splits the line in place */
 	strncpy(posix_system_string, input, POSIX_SYSTEM_SIZE - 1);
