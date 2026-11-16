@@ -53,7 +53,21 @@ uint64_t efr32_time_us(void);
 /** Busy wait. */
 void efr32_delay_us(uint32_t us);
 
-/** A UART: pins (EFR32_PIN), baud, the queues (each holds size - 1 bytes). */
+/**
+ * The LDMA channel that receives for the tty (0 .. 7), or -1 for the receive interrupt. The LDMA
+ * goes on while the flash is erased or written with interrupts off (~12 ms a page), which
+ * the interrupt cannot: the USART holds only 2 bytes. A board that uses this channel itself
+ * sets another with -D.
+ */
+#ifndef EFR32_TTY_LDMA_CH
+#define EFR32_TTY_LDMA_CH 7
+#endif
+
+/**
+ * A UART: pins (EFR32_PIN), baud, the queues (each holds size - 1 bytes; the receive queue at
+ * most 2048 bytes). With the LDMA a receive queue that is not read in time loses what it held,
+ * and `lost` counts only the USART's own overruns.
+ */
 typedef struct {
 	uint8_t tx_pin;
 	uint8_t rx_pin;
@@ -101,8 +115,8 @@ uint32_t efr32_reset_reason(void);
  * 4 KiB of data kept in two flash pages at @p base (16 KiB, page aligned): reads come from a RAM
  * copy; a write changes the copy, and the task "flash" writes it to the other page 0.3 s after
  * the last write, with the next generation. A reset in between keeps the page before. The
- * erase and the writes run from RAM with interrupts off (~15 ms): the UART loses what comes in
- * meanwhile.
+ * erase and the writes run from RAM with interrupts off (~15 ms): the tty receives meanwhile
+ * through the LDMA (EFR32_TTY_LDMA_CH); with the receive interrupt it would lose what comes in.
  */
 typedef struct {
 	vfs_blk_t blk; /**< Must be first. */

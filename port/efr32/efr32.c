@@ -255,6 +255,52 @@ void USART0_TX_IRQHandler(void)
 	}
 }
 
+#if EFR32_TTY_LDMA_CH >= 0
+/*
+ * Received bytes go to the queue through the LDMA, one descriptor linked to itself: when the
+ * queue's end is reached it starts over at the beginning. The descriptor is in RAM, as the
+ * LDMA reads it again at each wrap, also while the flash is busy. The queue's tail is where
+ * the LDMA writes next.
+ */
+static uint32_t rx_descriptor[4];
+
+static void rx_dma_start(efr32_tty_t *t)
+{
+	const uint32_t ch = EFR32_TTY_LDMA_CH;
+	const uint32_t mask = 1ul << ch;
+
+	CMU->CLKEN0_SET = CMU_CLKEN0_LDMA | CMU_CLKEN0_LDMAXBAR;
+	LDMA->EN_SET = LDMA_EN_EN;
+	LDMA->CHDIS = mask;
+
+	rx_descriptor[0] = LDMA_CH_CTRL_STRUCTTYPE_TRANSFER |
+			   (((uint32_t)t->rx_size - 1u) << _LDMA_CH_CTRL_XFERCNT_SHIFT) |
+			   LDMA_CH_CTRL_BLOCKSIZE_UNIT1 | LDMA_CH_CTRL_REQMODE_BLOCK |
+			   LDMA_CH_CTRL_SRCINC_NONE | LDMA_CH_CTRL_SIZE_BYTE | LDMA_CH_CTRL_DSTINC_ONE;
+	rx_descriptor[1] = (uint32_t)&USART0->RXDATA;
+	rx_descriptor[2] = (uint32_t)t->rx;
+	rx_descriptor[3] = (uint32_t)rx_descriptor | LDMA_CH_LINK_LINK; /* itself, absolute */
+
+	LDMAXBAR->CH[ch].REQSEL =
+		LDMAXBAR_CH_REQSEL_SOURCESEL_USART0 | LDMAXBAR_CH_REQSEL_SIGSEL_USART0RXDATAV;
+	LDMA->CH[ch].LOOP = 0;
+	LDMA->CH[ch].CFG = 0;
+	LDMA->CH[ch].LINK = (uint32_t)rx_descriptor;
+	LDMA->IEN_CLR = mask;
+	LDMA->IF_CLR = mask;
+	LDMA->REQDIS_CLR = mask;
+	LDMA->CHDONE_CLR = mask;
+	LDMA->LINKLOAD = mask; /* loads the descriptor and starts the channel */
+}
+
+/* where the LDMA writes the next byte */
+static uint16_t rx_tail(const efr32_tty_t *t)
+{
+	uint32_t at = LDMA->CH[EFR32_TTY_LDMA_CH].DST - (uint32_t)t->rx;
+
+	return (at < t->rx_size) ? (uint16_t)at : 0u;
+}
+#else
 void USART0_RX_IRQHandler(void)
 {
 	efr32_tty_t *t = usart0_tty;
@@ -288,6 +334,12 @@ void USART0_RX_IRQHandler(void)
 		t->lost++;
 	}
 }
+
+static uint16_t rx_tail(const efr32_tty_t *t)
+{
+	return t->rx_tail;
+}
+#endif
 
 static void tty_kick(efr32_tty_t *t)
 {
@@ -330,12 +382,23 @@ static int tty_read(void *args, void *buffer, unsigned int length)
 	uint8_t *data = buffer;
 	unsigned int n = 0;
 
-	while (n < length && t->rx_head != t->rx_tail) {
+	uint16_t tail = rx_tail(t);
+
+	while (n < length && t->rx_head != tail) {
 		uint16_t head = t->rx_head;
 
 		data[n++] = t->rx[head++];
 		t->rx_head = (head == t->rx_size) ? 0u : head;
 	}
+
+#if EFR32_TTY_LDMA_CH >= 0
+	t->in += n;
+
+	if (USART0->IF & USART_IF_RXOF) {
+		USART0->IF_CLR = USART_IF_RXOF;
+		t->lost++;
+	}
+#endif
 
 	return (int)n;
 }
@@ -378,7 +441,7 @@ static const vfs_handler_t tty_node = {
 
 int efr32_tty_register(const char *name, efr32_tty_t *t)
 {
-	if (usart0_tty != NULL) {
+	if (usart0_tty != NULL || (EFR32_TTY_LDMA_CH >= 0 && t->rx_size > 2048u)) {
 		return -1;
 	}
 
@@ -403,11 +466,16 @@ int efr32_tty_register(const char *name, efr32_tty_t *t)
 
 	usart0_tty = t;
 	USART0->IF_CLR = _USART_IF_MASK;
+#if EFR32_TTY_LDMA_CH >= 0
+	USART0->IEN = 0;
+	rx_dma_start(t);
+#else
 	USART0->IEN = USART_IEN_RXDATAV;
-	USART0->CMD = USART_CMD_RXEN | USART_CMD_TXEN;
 	NVIC_SetPriority(USART0_RX_IRQn, 2);
-	NVIC_SetPriority(USART0_TX_IRQn, 2);
 	NVIC_EnableIRQ(USART0_RX_IRQn);
+#endif
+	USART0->CMD = USART_CMD_RXEN | USART_CMD_TXEN;
+	NVIC_SetPriority(USART0_TX_IRQn, 2);
 	NVIC_EnableIRQ(USART0_TX_IRQn);
 
 	return vfs_node_new(name, false, t, &tty_node) < 0 ? -1 : 0;
