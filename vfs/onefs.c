@@ -34,7 +34,7 @@ typedef struct {
 	uint8_t *data;
 	uint16_t size;
 	uint16_t pos;
-	uint8_t flags;
+	bool append; /* O_APPEND (02000 on Linux: not a byte) */
 	bool dirty;
 } onefs_file_t;
 
@@ -162,7 +162,7 @@ static void *onefs_open(void *fs, const char *name, int flags)
 	f->data = data;
 	f->size = 0;
 	f->pos = 0;
-	f->flags = (uint8_t)flags;
+	f->append = (flags & O_APPEND) != 0;
 	f->dirty = !o->exists; /* O_CREAT: there is a file at close, empty or not */
 
 	if (o->exists && !(flags & O_TRUNC)) {
@@ -202,7 +202,7 @@ static int onefs_write(void *file, const void *buffer, unsigned int length)
 	onefs_file_t *f = file;
 	uint16_t capacity = onefs_capacity(f->fs);
 
-	if (f->flags & O_APPEND) {
+	if (f->append) {
 		f->pos = f->size;
 	}
 

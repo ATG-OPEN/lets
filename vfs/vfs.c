@@ -784,7 +784,7 @@ typedef struct {
 	void *object;		   /* what the type's open() returned, or the node */
 	unsigned int position;	   /* a node's read position */
 	uint8_t holders;	   /* 0: a free entry */
-	uint8_t flags;		   /* open()'s, and VFS_FD_PEER */
+	uint8_t flags;		   /* open()'s access mode, and VFS_FD_PEER */
 } vfs_fd_t;
 
 #define VFS_FD_PEER 0x80u /* the driver saw a new peer (vfs_peer_new()), not asked yet */
@@ -810,7 +810,7 @@ static int vfs_fd_new(const vfs_fs_type_t *type, void *fs, void *object, int fla
 			f->object = object;
 			f->position = 0;
 			f->holders = 1;
-			f->flags = (uint8_t)(flags & (O_ACCMODE | O_APPEND));
+			f->flags = (uint8_t)(flags & O_ACCMODE);
 
 			return VFS_FD_FIRST + (int)k;
 		}
