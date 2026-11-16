@@ -20,6 +20,14 @@
  *   Ctrl-C (drop it), Up / Down (earlier lines) and Tab (complete a name:
  *   commands, devices, files in the node table, or the last part of a path)
  *   work as in a PC shell.
+ *
+ * A line can hold several commands split by ';'. When one moves the console
+ * away (`std`), the shell follows at once and drops what it had read from the
+ * old one: a tty handed to a program is not read from any more, so
+ *
+ *   link /dev/port ttyS1; std /dev/port
+ *
+ * typed on ttyS1 gives the tty to the link with nothing read in between.
  */
 
 #include "../vfs/vfs.h"
@@ -121,11 +129,32 @@ void shell_wait(task_t *t)
 	}
 }
 
-/* runs a command typed here */
+/*
+ * Runs a line typed here: commands split by ';' (not in quotes) run one after the other before
+ * the shell reads again, so `link ... ttyS0; std port` hands a tty over with nothing read between.
+ */
 static void shell_run(char *line)
 {
 	shell->in_command = true;
-	system(line);
+
+	while (line != NULL && !task_stopping()) {
+		char *command = line;
+		bool quoted = false;
+		char *p = line;
+
+		for (line = NULL; *p != '\0'; p++) {
+			quoted ^= (*p == '"');
+
+			if (*p == ';' && !quoted) {
+				*p = '\0';
+				line = p + 1;
+				break;
+			}
+		}
+
+		system(command);
+	}
+
 	shell->in_command = false;
 }
 
@@ -501,6 +530,8 @@ static void shell_lines(bool all)
 
 		buf[n] = '\0';
 
+		int in = vfs_stream(0);
+
 		if (n > 0) {
 			shell_run(buf);
 		}
@@ -508,6 +539,12 @@ static void shell_lines(bool all)
 		n += (n < shell->length) ? 1u : 0u;
 		shell->length -= n;
 		memmove(buf, buf + n, shell->length);
+
+		/* the input moved (`std`): what is left came from the old one, which is not ours now */
+		if (vfs_stream(0) != in) {
+			shell->length = 0;
+			return;
+		}
 
 		/* the command left a task running: the next lines wait for it */
 		if (shell_waiting()) {
@@ -575,9 +612,11 @@ int shell_loop(void *args, uint64_t system_time)
 			shell_prompt();
 		}
 
+		int in = vfs_stream(0);
 		int size = read(0, keys, sizeof(keys));
 
-		for (int i = 0; i < size && !task_stopping(); i++) {
+		/* the keys after one that moved the input (`std`) were typed on the old one */
+		for (int i = 0; i < size && !task_stopping() && vfs_stream(0) == in; i++) {
 			shell_key(keys[i]);
 
 			/* a command left a task running: the prompt comes when it ends */

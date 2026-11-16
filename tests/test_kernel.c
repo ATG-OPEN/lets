@@ -79,6 +79,33 @@ static int term_read(void *args, void *buffer, unsigned int length)
 
 static vfs_handler_t term_node = {.write_handler = sink_write, .read_handler = term_read};
 
+/* a port that holds what is put in it until read */
+typedef struct {
+	char data[128];
+	unsigned head, tail;
+} queue_t;
+
+static queue_t qa, qb;
+
+static int queue_read(void *args, void *buffer, unsigned int length)
+{
+	queue_t *q = args;
+	unsigned n = 0;
+
+	while (n < length && q->head < q->tail)
+		((char *)buffer)[n++] = q->data[q->head++];
+	return (int)n;
+}
+
+static void queue_put(queue_t *q, const char *text)
+{
+	q->head = q->tail = 0;
+	strcpy(q->data, text);
+	q->tail = (unsigned)strlen(text);
+}
+
+static vfs_handler_t queue_node = {.write_handler = sink_write, .read_handler = queue_read};
+
 /* a port whose queue is full every other write, as a packet port's is: write() returns 0 */
 static char narrow[2048];
 static int ls_shown;
@@ -165,12 +192,13 @@ void reboot_reset(void)
 /* -------------------------------------------------------------------------- */
 /* a command */
 
-static int last_argc;
+static int last_argc, probes;
 static char last_arg[32];
 
 static int cmd_probe(void *args, int argc, char *argv[])
 {
 	(void)args;
+	probes++;
 	last_argc = argc;
 	if (argc > 1)
 		strncpy(last_arg, argv[1], sizeof(last_arg) - 1);
@@ -352,6 +380,24 @@ static int checks(void *args, uint64_t t)
 		CHECK(write(1, "two\n", 4) == 4);
 		CHECK(strcmp(sink, "two\r\n") == 0);
 		CHECK(system("std sink") == 0 && !vfs_terminal());
+
+		/* several commands on a line; `std` moves the shell at once, and what it had read from
+		 * the old input after that is dropped: it no longer reads there */
+		CHECK(vfs_node_create("qa", false, &qa, &queue_node) >= 0);
+		CHECK(vfs_node_create("qb", false, &qb, &queue_node) >= 0);
+		CHECK(system("std qa") == 0);
+		queue_put(&qa, "probe a b; probe \"c;d\" e\nstd qb; probe f g\nprobe frames\n");
+		probes = 0;
+		shell_loop(NULL, 0);
+		CHECK(probes == 3 && last_argc == 3 && strcmp(last_arg, "f") == 0);
+		CHECK(qa.head == qa.tail);
+		queue_put(&qa, "probe x y\n");
+		shell_loop(NULL, 0);
+		CHECK(probes == 3 && qa.head == 0); /* not read */
+		queue_put(&qb, "probe h i\n");
+		shell_loop(NULL, 0);
+		CHECK(probes == 4 && strcmp(last_arg, "h") == 0);
+		CHECK(system("std sink") == 0);
 		sink_len = 0;
 		CHECK(write(1, "three\n", 6) == 6 && strcmp(sink, "three\n") == 0);
 		step = 2;
