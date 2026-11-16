@@ -31,7 +31,8 @@ Each difference is marked:
 | Linux | LETS | |
 |-|-|-|
 | `\|` pipes | None. There are no blocking reads, so two tasks can't stream to each other. Running the first into a RAM buffer and the second from it would work for short output | add |
-| `;`, `&&`, `\|\|` | None; one command per line | add |
+| `;` | At the shell (typed lines), not in scripts or `system()` | add |
+| `&&`, `\|\|` | None | add |
 | `&` | None. A command that starts a task is in the background anyway | keep |
 | `2>`, `2>&1` | None. stderr follows stdout, and in `ls 2> x` the `2` is an argument to `ls` | keep |
 | A shell reads to the end of a line | The same. One with no end runs when the input stops for 50 ms, as some programs send a line per packet | keep |
@@ -113,7 +114,7 @@ Next, for working on a live system:
 
 3. **`kill` by ID, and a stop callback.** A task can then switch its outputs to a safe state, which
    matters on a machine more than anywhere: today a killed task leaves them as they were.
-4. **`;` and `&&`** in `system()`.
+4. **`;` and `&&`** in `system()` (the shell already splits typed lines at `;`).
 5. **Arguments for scripts:** `$1`, `$2` in argscript.
 6. **A log.** A ring buffer as a node, `/dev/log`, kept across a reset when RAM survives it.
 7. **`tail -f`, `grep`, `wc`, `head`.** Small, each its own command so that a project pays only for
