@@ -175,6 +175,24 @@ static int cmd_hold(void *args, int argc, char *argv[])
 	return (task_create("hold", hold_task, NULL) == NULL) ? -1 : 0;
 }
 
+static uint8_t link_cwd; /* the working directory before the link test moved it */
+
+/* the same, but the shell the command was typed into waits for the task */
+static int cmd_held(void *args, int argc, char *argv[])
+{
+	task_t *t = task_create("hold", hold_task, NULL);
+
+	shell_wait(t);
+	return (t == NULL) ? -1 : 0;
+}
+
+/* a line with no end */
+static int cmd_part(void *args, int argc, char *argv[])
+{
+	printf("x");
+	return 0;
+}
+
 static void file_is(const char *path, const char *text)
 {
 	char got[64] = {0};
@@ -441,7 +459,8 @@ static int checks(void *args, uint64_t t)
 		CHECK(shell_loop(NULL, 0) == 2000 && probes == 0);
 		queue_put(&qa, "s3cret\nprobe c\n");
 		CHECK(shell_loop(NULL, 0) == 10 && probes == 1 && strcmp(last_arg, "c") == 0);
-		CHECK(strcmp(sink, "Password:\nPassword:\n") == 0); /* nothing echoed */
+		/* nothing echoed; a prompt when the word is taken, another after probe c */
+		CHECK(strcmp(sink, "Password:\nPassword:\n> > ") == 0);
 		queue_put(&qa, "probe d\n");
 		shell_loop(NULL, 0);
 		CHECK(probes == 2); /* the same stream: asked once */
@@ -537,6 +556,32 @@ static int checks(void *args, uint64_t t)
 		CHECK(system("kill nothing") == -1 && system("kill") == -1);
 		CHECK(system("top") == 0 && system("top x") == -1);
 
+		/* a link: after each command the prompt (the working directory and "$ ", as a terminal
+		 * shows it), also when the command wrote nothing or failed, so a program knows it is
+		 * done; after what the command wrote, also a line with no end */
+		link_cwd = task_streams()->cwd;
+
+		CHECK(vfs_register_app("held", cmd_held) == 0 && vfs_register_app("part", cmd_part) == 0);
+		CHECK(system("std qa") == 0 && !vfs_terminal());
+		sink_len = 0;
+		sink[0] = '\0';
+		queue_put(&qa, "cd /dev\n");
+		shell_loop(NULL, 0);
+		CHECK(strcmp(sink, "/dev$ ") == 0);
+		sink_len = 0;
+		queue_put(&qa, "echo\nno_such_command\r\npwd\npart\n");
+		shell_loop(NULL, 0);
+		CHECK(strcmp(sink, "\n/dev$ not found\n/dev$ /dev\n/dev$ x/dev$ ") == 0);
+		sink_len = 0;
+		queue_put(&qa, "\n\r\n");
+		shell_loop(NULL, 0);
+		CHECK(sink_len == 0); /* no command, no prompt */
+
+		/* a command that leaves a task the shell waits for: the prompt when the task has ended */
+		queue_put(&qa, "held\n");
+		shell_loop(NULL, 0);
+		CHECK(sink_len == 0);
+
 		/* a task started under a redirect stays on it */
 		CHECK(vfs_register_app("hold", cmd_hold) == 0);
 		CHECK(system("hold > log") == 0);
@@ -544,6 +589,12 @@ static int checks(void *args, uint64_t t)
 		return 0;
 	}
 	if (step == 3) {
+		shell_loop(NULL, 0);
+		/* (top, from before, may have written too) */
+		CHECK(sink_len > 20 && strcmp(sink + sink_len - 20, "from the task\n/dev$ ") == 0);
+		CHECK(count_of(sink, "$ ") == 1);
+		CHECK(system("std sink") == 0);
+		task_streams()->cwd = link_cwd;
 		file_is("log", "from the task\n");
 
 		/* `shell`: its own task on its own streams; the console stays where it is */
@@ -623,7 +674,7 @@ static int checks(void *args, uint64_t t)
 		return 30;
 	}
 	if (step == 7) {
-		CHECK(strcmp(sink, "one\ntwo\n") == 0);
+		CHECK(strcmp(sink, "one\n/$ two\n/$ ") == 0); /* a prompt after each command */
 		keys = "ree\necho no end";
 		step = 8;
 		return 30;
@@ -633,7 +684,7 @@ static int checks(void *args, uint64_t t)
 			return 1;
 		}
 
-		CHECK(strcmp(sink, "one\ntwo\nthree\nno end\n") == 0);
+		CHECK(strcmp(sink, "one\n/$ two\n/$ three\n/$ no end\n/$ ") == 0);
 		CHECK(system("kill shell") == 0);
 
 		/* each task has its own working directory, and gets its creator's */

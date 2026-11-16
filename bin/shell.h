@@ -21,7 +21,9 @@
  * more, each on its own streams: `shell -t < ttyS1 > ttyS1`.
  *
  * After `std <node>`, or for a `shell`, one read() is one command line, with no
- * echo: the mode for a program on the other end. After `std -t <node>`, or for a
+ * echo: the mode for a program on the other end. After each command, also one
+ * that wrote nothing, it sends the prompt (as a terminal shows it, "/tmp$ "), so
+ * the program knows the command is done. After `std -t <node>`, or for a
  * `shell -t`, it is a terminal for a person (screen, PuTTY): a prompt, echo, Backspace, Ctrl-U, Ctrl-C,
  * Up / Down for the last SHELL_HISTORY lines (default 2, 128 bytes each, taken
  * from the heap when the terminal is first used; -DSHELL_HISTORY=0 for none)
@@ -61,7 +63,7 @@ void shell_wait(task_t *t);
  * input moves (`std`) or the input's driver signals a new peer (vfs_peer_new(), e.g. a
  * packet port whose packets now come from another address). A terminal shows
  * "Password: " and echoes nothing; a program link gets "Password:" back for each line
- * it sent while locked. A wrong word runs nothing, drops the rest of what was read and
+ * it sent while locked, and the prompt when the word is taken. A wrong word runs nothing, drops the rest of what was read and
  * makes the shell read nothing for SHELL_PASSWORD_DELAY ms (2000). Only a 32-bit hash
  * of the word is kept in RAM. -DSHELL_NO_PASSWORD leaves it out.
  *
@@ -77,7 +79,7 @@ int shell_passwd(void *args, int argc, char *argv[]);
 int shell_start(void *args, int argc, char *argv[]);
 
 /**
- * @brief Replaces the prompt of the terminal mode (default "> ").
+ * @brief Replaces the prompt (default "> "), of a terminal and of a link.
  *
  * @p prompt prints it with write(2, ...); vfs_bin_initialize() installs one
  * that shows the working directory, as a Linux shell does ("/tmp$ ").

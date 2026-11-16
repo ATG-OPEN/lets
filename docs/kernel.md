@@ -120,7 +120,17 @@ int name_execute(void * args, int argc, char *argv[]);
 - `-help` prints usage, one option per line.
 
 On a link the shell runs lines, ended by `\n` or `\r`; a line with no end runs when the input
-stops for 50 ms, for programs that send a line per packet. The startup script,
+stops for 50 ms, for programs that send a line per packet. After each command it sends the
+prompt a terminal shows, the working directory and `$ ` (`~$ `, `/tmp$ `), after what the command
+wrote, and also when it wrote nothing (`cd`, `passwd`, `echo`): a program reads up to the prompt
+and knows the command is done, without a timeout. A command that leaves a task the shell waits
+for (`top`) gets its prompt when the task ends; an empty line gets none.
+
+```
+cd /tmp          ->  /tmp$
+pwd              ->  /tmp\n/tmp$
+nothing          ->  not found\n/tmp$
+``` The startup script,
 `/boot/rc`, is the same syntax, one command per line, run by argscript.
 
 For loops, conditions, variables and background scripts, see

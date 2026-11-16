@@ -14,7 +14,10 @@
  * - shell, std <node>: a link to a program. Lines end with '\n' or '\r', so a
  *   file can be read and a line can come in pieces. One with no end runs when
  *   the input stops for a moment, as programs that send a line per packet do.
- *   No echo and no prompt, so a program reads only the replies.
+ *   No echo. After each command, the prompt a terminal shows ("/tmp$ "), also
+ *   when the command wrote nothing: the program knows it is done and need not
+ *   wait for a timeout. A command that leaves a task the shell waits for gets
+ *   it when the task ends; a line moving the input away (`std`), none.
  * - shell -t, std -t <node>: a terminal with a person typing. Keys are collected
  *   into a line and echoed; Enter runs it. Backspace, Ctrl-U (clear the line),
  *   Ctrl-C (drop it), Up / Down (earlier lines) and Tab (complete a name:
@@ -34,7 +37,8 @@
  * startup script; `passwd -` switches it off; -DSHELL_PASSWORD_DEFAULT=\"\" builds without). It is asked once per input stream (a tty: once after power-up), and again
  * when the input moves (`std`) or its driver says a new peer is on the other end
  * (vfs_peer_new(): a packet port whose packets come from another address). A terminal shows
- * "Password: " and does not echo; a link gets "Password:" after each line it sent while locked.
+ * "Password: " and does not echo; a link gets "Password:" after each line it sent while locked,
+ * and the prompt when the word is taken.
  * A wrong word: no command runs, the rest of what was read is dropped and the shell reads
  * nothing for SHELL_PASSWORD_DELAY ms. Only a 32-bit hash of the word is kept.
  */
@@ -90,6 +94,7 @@ typedef struct {
 	unsigned int length; /* characters in buffer */
 	bool started;	     /* it has run */
 	bool prompted;	     /* the prompt for this line is shown */
+	bool done;	     /* a link: a line ran, its prompt is still to go */
 	bool last_cr;	     /* the previous key was '\r' (a "\r\n" Enter) */
 	uint8_t escape;	     /* 0, or 1 after ESC, 2 after ESC [ */
 	uint8_t idle;	     /* polls with no input, on a link */
@@ -276,6 +281,20 @@ static void (*shell_prompt_print)(void) = shell_prompt_default;
 void shell_prompt_set(void (*prompt)(void))
 {
 	shell_prompt_print = (prompt != NULL) ? prompt : shell_prompt_default;
+}
+
+/*
+ * A link: once a line has run (and a task it left has ended), the prompt, after what the command
+ * wrote, so a program knows the command is done, also when it wrote nothing.
+ */
+static void shell_done(void)
+{
+	if (shell->done && !shell_waiting() && !task_stopping()) {
+		shell->done = false;
+		vfs_stdout_flush();
+		shell_prompt_print();
+		shell_flush();
+	}
 }
 
 #ifndef SHELL_NO_TERMINAL
@@ -672,6 +691,8 @@ static void shell_lines(bool all)
 			shell_run(buf);
 		}
 
+		shell->done = (n > 0); /* a command ran, or the password was taken: the prompt is due */
+
 		n += (n < shell->length) ? 1u : 0u;
 		shell->length -= n;
 		memmove(buf, buf + n, shell->length);
@@ -679,6 +700,7 @@ static void shell_lines(bool all)
 		/* the input moved (`std`): what is left came from the old one, which is not ours now */
 		if (vfs_stream(0) != in) {
 			shell->length = 0;
+			shell->done = false;
 			return;
 		}
 
@@ -686,6 +708,8 @@ static void shell_lines(bool all)
 		if (shell_waiting()) {
 			return;
 		}
+
+		shell_done();
 	}
 }
 
@@ -721,7 +745,11 @@ static inline __attribute__((always_inline)) int shell_poll(void *args)
 		return 10;
 	}
 
-	/* lines left behind by a wait */
+	/* a link: the prompt of a line whose task has ended; then the lines left behind by the wait */
+	if (!vfs_terminal()) {
+		shell_done();
+	}
+
 	if (!vfs_terminal() && shell->length > 0) {
 		shell_lines(false);
 
