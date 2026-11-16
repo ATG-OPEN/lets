@@ -502,7 +502,8 @@ void vfs_interpreter_set(int (*run)(void *args, int argc, char *argv[]));
  * vfs_register_app("ed", vfs_ed);
  * @endcode
  * ed FILE lists it numbered; ed FILE Nc TEXT changes line N, Na adds after
- * it (0a: first), Ni inserts before it, Nd deletes it. The file is copied to
+ * it (0a: first), Ni inserts before it, Nd deletes it. FILE is a file of a
+ * mounted file system (a new one may be a RAM file). The file is copied to
  * a new version of itself (O_TRUNC) 16 bytes at a time with the edit made on
  * the way, so a file larger than the free heap can be edited, and an edit
  * that fails (or a line number past the end) leaves the file as it was.

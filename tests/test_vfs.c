@@ -986,6 +986,10 @@ static void test_tree(void)
 	CHECK(system("ed ~/new 9c x") == -1 && system("ed ~/new 0d") == -1);
 	CHECK(system("ed ~/new 2x y") == -1 && system("ed ~/new 1d extra") == -1);
 	CHECK(system("ed ~/nothing") == -1 && system("ed ttyS1 1d") == -1);
+	/* a RAM file or a block device is not edited: the copy would empty or overwrite it */
+	CHECK(system("echo keep me > /opt/ram") == 0 && system("ed /opt/ram 1a more") == -1);
+	CHECK(read_all("/opt/ram", buf, sizeof(buf)) == 8 && strcmp(buf, "keep me\n") == 0);
+	CHECK(system("rm /opt/ram") == 0 && system("ed /dev/ee0 1d") == -1);
 
 	/* a copy or an edit that fails on a full file system leaves what was there */
 	{

@@ -194,8 +194,11 @@ int vfs_ed(void *args, int argc, char *argv[])
 	int in = open(argv[1], O_RDONLY, 0);
 	long end = (in < 0) ? 0 : (long)lseek(in, 0, SEEK_END);
 
-	/* a file has a size; a device has none */
-	if (end < 0 || (in >= 0 && lseek(in, 0, SEEK_SET) != 0)) {
+	/*
+	 * A file of a file system: its O_TRUNC copy below is new, so the old one can still be read.
+	 * A RAM file would be emptied by that open, and a device has no lines to keep.
+	 */
+	if (end < 0 || (in >= 0 && (!vfs_file_is(in) || lseek(in, 0, SEEK_SET) != 0))) {
 		close(in);
 		printf("not a file\n");
 		return -1;
