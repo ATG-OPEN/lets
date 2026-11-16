@@ -203,6 +203,7 @@ static void log_add(const char *text)
 	strncat(out, text, sizeof(out) - strlen(out) - 1);
 }
 
+static long long_pos; /* the read position of the file open now */
 static int flaky_fails;
 static int flaky_lose; /* what `lose` sets flaky_fails to */
 
@@ -233,6 +234,10 @@ int t_open(const char *path, int flags, ...)
 	}
 	if (strcmp(path, "flaky") == 0)
 		return 11;
+	if (strcmp(path, "shrinks") == 0) {
+		long_pos = 0;
+		return 12;
+	}
 	return -1;
 }
 
@@ -244,7 +249,9 @@ static const char long_script[] =
 	"    set n $n + 1\n"
 	"end\n"
 	"echo long $n\n";
-static long long_pos;
+
+/* made shorter by the command `cut` while it runs */
+static char shrinks[64];
 
 /* larger than the heap of a small board: built by main() */
 static char big_script[4096];
@@ -258,7 +265,7 @@ static const char *file_text(int fd)
 	static const char flaky[] = "echo one\nlose\necho two\n";
 
 	return (fd == 7) ? script : (fd == 8) ? long_script : (fd == 9) ? big_script : (fd == 10) ? here_script :
-	       (fd == 11) ? flaky : NULL;
+	       (fd == 11) ? flaky : (fd == 12) ? shrinks : NULL;
 }
 
 off_t t_lseek(int fd, off_t offset, int whence)
@@ -266,7 +273,10 @@ off_t t_lseek(int fd, off_t offset, int whence)
 	if (file_text(fd) == NULL)
 		return -1; /* a node without a size */
 	long size = (long)strlen(file_text(fd));
-	long_pos = (whence == SEEK_END) ? size + offset : (whence == SEEK_SET) ? offset : long_pos + offset;
+	long to = (whence == SEEK_END) ? size + offset : (whence == SEEK_SET) ? offset : long_pos + offset;
+	if (to < 0 || to > size)
+		return -1; /* as a file system: not past the end */
+	long_pos = to;
 	return long_pos;
 }
 
@@ -355,6 +365,11 @@ int t_system(const char *cmd)
 
 	if (strcmp(cmd, "lose") == 0) {
 		flaky_fails = flaky_lose;
+		return 0;
+	}
+
+	if (strcmp(cmd, "cut") == 0) {
+		strcpy(shrinks, "x\n");
 		return 0;
 	}
 
@@ -498,6 +513,7 @@ int main(void)
 	check("busy loop yields", "while 1\nend", 3, "");
 
 	check("errors", "set a 1 / 0\necho never", 5, "{-as line 1: divide by zero}");
+	check("modulo of a fraction", "set a 5 % 0.5\necho never", 5, "{-as line 1: divide by zero}");
 	check("error end", "echo a\n\n  # x\nend", 5, "[echo a]{-as line 4: end without block}");
 	check("error missing end", "if 0\necho a", 5, "{-as line 2: missing end}");
 	check("error label", "set a 1\ngoto nowhere", 5, "{-as line 2: not found}");
@@ -545,6 +561,10 @@ int main(void)
 	flaky_lose = 1000;
 	check("as file gone", "as flaky", 3000, "[echo one]{-as: cannot read}");
 	flaky_fails = 0;
+
+	/* a file cut short under the running script: it ends there, it does not start over */
+	strcpy(shrinks, "echo a\ncut\necho b\necho c\n");
+	check("as file cut short", "as shrinks", 20, "[echo a]");
 
 	/* the path is relative to where the script started, also after a `cd` in it */
 	reset();

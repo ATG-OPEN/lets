@@ -255,9 +255,8 @@ static unsigned int as_read_file(as_state_t *s, uint16_t at, char *buf, unsigned
 		return 0;
 	}
 
-	lseek(fd, at, SEEK_SET); /* a file: it was sized before the script started */
-
-	int r = read(fd, buf, n);
+	/* a file that became shorter than where the script is: its end (not its start again) */
+	int r = (lseek(fd, at, SEEK_SET) == (off_t)at) ? read(fd, buf, n) : 0;
 
 	close(fd);
 
@@ -477,7 +476,8 @@ static int as_set(as_state_t *s, char *p)
 		return 0;
 	}
 
-	if ((op == '/' || op == '%') && b == 0) {
+	/* % takes the integer parts: 5 % 0.5 divides by 0 too */
+	if ((op == '/' && b == 0) || (op == '%' && (long)b == 0)) {
 		return as_error(s, "divide by zero");
 	}
 
