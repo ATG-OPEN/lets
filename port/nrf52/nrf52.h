@@ -15,7 +15,8 @@
  * @endcode
  * Commands: `ttyS0 -b BAUD`, `ttyS0 -stat`.
  *
- * Resources: TIMER1 (the clock, 1 MHz, 32 bits + an overflow count), UART0 (one tty).
+ * Resources: TIMER1 (the clock, 1 MHz, 32 bits + an overflow count), UART0 (one tty); with
+ * NRF52_TTY_RX_PPI set, UARTE0, NRF52_TTY_RX_TIMER and that PPI channel instead.
  */
 #ifndef LETS_NRF52_H
 #define LETS_NRF52_H
@@ -32,7 +33,29 @@ uint64_t nrf52_time_us(void);
 /** Busy wait. */
 void nrf52_delay_us(uint32_t us);
 
-/** A UART: pins (P0.n = n, P1.n = 32 + n), baud, the queues (each holds size - 1 bytes). */
+/**
+ * The PPI channel (0 .. 19) that lets the tty receive through EasyDMA, or -1 (the default) for
+ * the receive interrupt. An erase of a flash page stalls the CPU ~85 ms, and no interrupt runs
+ * meanwhile: the UART holds 6 bytes, so what comes in during a write of /boot is lost. With a
+ * channel set, the tty is UARTE0: it receives into the receive queue by EasyDMA (RAM, no CPU),
+ * started again at its start each time it is full, and NRF52_TTY_RX_TIMER counts the bytes
+ * (each RXDRDY event, through the channel): the count is where EasyDMA writes next. It sends
+ * from the send queue by EasyDMA too. The queue must hold what comes in during an erase
+ * (115200 baud: 980 bytes; 230400: 1960). Built only: not yet tried on a board.
+ */
+#ifndef NRF52_TTY_RX_PPI
+#define NRF52_TTY_RX_PPI -1
+#endif
+
+#ifndef NRF52_TTY_RX_TIMER
+#define NRF52_TTY_RX_TIMER NRF_TIMER2 /**< Counts the received bytes, with NRF52_TTY_RX_PPI set. */
+#endif
+
+/**
+ * A UART: pins (P0.n = n, P1.n = 32 + n), baud, the queues (each holds size - 1 bytes; both in
+ * RAM). With NRF52_TTY_RX_PPI set, a receive queue that is not read in time loses what it held,
+ * and `lost` counts only the UARTE's own errors.
+ */
 typedef struct {
 	uint8_t tx_pin;
 	uint8_t rx_pin;

@@ -50,16 +50,22 @@ build/as_test: argscript/test/as_test.c argscript/argscript.c lib/args.c | build
 	    -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek -Dmalloc=t_malloc -Dfree=t_free \
 	    -Dprintf=t_printf argscript/test/as_test.c argscript/argscript.c lib/args.c -o $@
 
+# the nRF52 tty with EasyDMA, on registers the test plays (tests/nrf52/nrf.h)
+build/test_nrf52: tests/test_nrf52.c tests/nrf52/nrf.h port/nrf52/nrf52.c port/nrf52/nrf52.h | build
+	$(CC) $(CFLAGS) -Wno-pointer-to-int-cast $(SAN) -DNRF52_TTY_RX_PPI=3 -Itests/nrf52 tests/test_nrf52.c \
+	    port/nrf52/nrf52.c -o $@
+
 LIBS    = $(filter-out lib/uuid.c opt/tty.c,$(wildcard lib/*.c) $(wildcard opt/*.c))
 
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done
 
-test: build/test_kernel build/test_sleep build/test_vfs build/as_test libs
+test: build/test_kernel build/test_sleep build/test_vfs build/as_test build/test_nrf52 libs
 	./build/test_kernel
 	./build/test_sleep
 	./build/test_vfs
 	./build/as_test
+	./build/test_nrf52
 	$(MAKE) -C lib/test
 
 SOURCES = $(shell git ls-files '*.c' '*.h' 2>/dev/null)
