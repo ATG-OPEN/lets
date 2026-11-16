@@ -34,7 +34,7 @@ uint64_t system_time_get(void)
 ## Heap
 
 `ALLOC_INIT_HEAP(size);` once, in one C file. `malloc` / `free` come from `kernel/alloc.c`
-(64 blocks, 2-byte alignment; 8 in a host build). `alloc_map()` / `alloc_info()` print it; `top` shows each
+(32 blocks, `-DMAX_BLOCK_COUNT=n`; 2-byte alignment, 8 in a host build). `alloc_info()` (`top mem`) prints it; `top` shows each
 task's share.
 
 ## stdout and the shell
@@ -49,7 +49,9 @@ once per stream (a tty once after power-up), and again when the stream's driver 
 is `SHELL_PASSWORD_DEFAULT`, **"123456", which everyone knows**: put `passwd WORD` in the
 board's startup script. `passwd -` switches it off (for a board whose shell is driven by a
 program that does not log in); `-DSHELL_PASSWORD_DEFAULT=\"\"` builds without a default and
-`-DSHELL_NO_PASSWORD` without the password at all.
+`-DSHELL_NO_PASSWORD` without the password at all. It guards the shells only, and goes in clear:
+the node `sys` (`bin/sys.c`), or a network service that can write `/boot/rc` or `/home`, runs
+commands without it, so keep those off a link a stranger can reach.
 
 ## XC16
 

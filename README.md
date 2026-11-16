@@ -45,13 +45,18 @@ make            # builds build/lets-demo and build/lets-vfs-demo
 ```
 
 ```text
-kernel running on the host - try: ls /bin, top, echo hi > f, cat f
+kernel running on the host - try: ls, top, echo hi, touch f, cat f
+123456
 top
-2		15824B		16384B		1.40		716
-ID		NAME		RAM		DUR		PER
-0		shell		0B		0.01ms		10.28ms
-2		idle		0B		1.40ms		1.28ms
+up 0d 00:00:04  tasks 3  loop 1.56ms (641/s)  reset -
+heap 104 of 16384 B used (0%)
+ ID NAME            STATE   RAM    LAST     MAX  PERIOD   CPU
+  0 shell           sleep    0B     7us     7us 10.1ms  0.0%
+  1 idle            run      0B  1.53ms  1.54ms  1.56ms 98.0%
+  2 top             run    104B    16us    23us  1.53ms  1.6%
 ```
+
+The demo's shell asks for the password first: the built-in default, `123456`.
 
 `top mem` shows the heap, the most stack ever used, and why the chip last reset (RCON).
 

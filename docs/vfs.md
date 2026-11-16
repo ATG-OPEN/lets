@@ -90,8 +90,8 @@ a console on ttyS1 to write the board's own rc from (`ed /boot/rc ...`). An rc t
 stays as it is; it holds all of the board's setup, the shell's port too (`std ttyS1`). If the
 memory does not answer, `vfs_boot()` runs those two lines itself.
 
-`/boot/rc` is run by argscript (`vfs_interpreter_set(argscript_execute)`): the file is read
-whole, and it runs as its own task, so a plain list of commands works and so do `wait`, `if`
+`/boot/rc` is run by argscript (`vfs_interpreter_set(argscript_execute)`): the file is read a
+line at a time while it runs, as its own task, so a plain list of commands works and so do `wait`, `if`
 and loops. Without an interpreter set, a script file does not run.
 
 - `"tfs"` for a memory of 1 KiB and more.
@@ -206,9 +206,9 @@ close(fd);
 
 Flags: `O_RDONLY`, `O_WRONLY` and `O_RDWR` read and write at the position. `O_CREAT`, `O_EXCL` and
 `O_APPEND` work as in POSIX. `O_TRUNC` writes a new copy that replaces the old file at `close()`.
-Flags `0`, which is how drivers and apps open nodes, behave like a RAM file: reads start at the
-beginning and writes append. So `echo` and argscript `write` add to a file instead of overwriting
-it.
+Flags `0` is `O_RDONLY`: such a handle reads, and a write on it fails. A RAM file appends every
+write, whatever the flags. `echo text >> file` and argscript `write` open with
+`O_WRONLY | O_APPEND`, so they add to a file instead of overwriting it.
 
 There is also `vfs_mkdir`, `vfs_remove`, `vfs_rename`, `vfs_chdir`, `vfs_resolve`, `vfs_dir_read`,
 `vfs_mount` and `vfs_umount`. See `vfs/vfs.h`. `tfs.h` is the file system on its own, with no

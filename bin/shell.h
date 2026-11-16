@@ -13,9 +13,9 @@
  * @brief Registers the built-in commands and starts the shell.
  *
  * The shell is a task that reads command lines from stdin and runs each with
- * system(). Commands: kill, top, touch, rm (plus std, registered by
- * vfs_initialize(), and reboot, built into system()); vfs_bin_initialize()
- * adds ls, cat, echo, mv, cd and the other file commands.
+ * system(). The commands (ls, cat, cd, kill, top, std, passwd, reboot, ...) are
+ * the built-in ones of vfs/bin.c, in flash; vfs_bin_initialize() adds the prompt
+ * with the working directory and Tab on paths.
  *
  * This shell is on the console, where `std` points. The command `shell` starts
  * more, each on its own streams: `shell -t < ttyS1 > ttyS1`.
@@ -64,6 +64,12 @@ void shell_wait(task_t *t);
  * it sent while locked. A wrong word runs nothing, drops the rest of what was read and
  * makes the shell read nothing for SHELL_PASSWORD_DELAY ms (2000). Only a 32-bit hash
  * of the word is kept in RAM. -DSHELL_NO_PASSWORD leaves it out.
+ *
+ * It guards what a shell reads, nothing else: the word goes in clear over the link, and
+ * whatever else runs commands or writes files is outside it (the node `sys` of bin/sys.c runs
+ * a line written to it; a service that can write /boot/rc or a script in /home runs it at the
+ * next boot or call). Keep those off a link a stranger can reach. A new `passwd` does not log
+ * out a shell that was given the old word.
  */
 int shell_passwd(void *args, int argc, char *argv[]);
 
