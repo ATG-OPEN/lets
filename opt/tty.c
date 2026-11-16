@@ -303,7 +303,9 @@ static int tty_execute(void *args, int argc, char *argv[])
 	if (argc == 3 && strcmp(argv[1], "-b") == 0) {
 		long baud = atol(argv[2]);
 
-		if (baud < 300 || (a->clock + 4u * (uint32_t)baud) / (8u * (uint32_t)baud) > 65536ul) {
+		/* above clock / 4 the divisor is 0 (a BRG of 0xFFFF), and 8 x baud could wrap to 0 */
+		if (baud < 300 || (uint32_t)baud > a->clock / 4u ||
+		    (a->clock + 4u * (uint32_t)baud) / (8u * (uint32_t)baud) > 65536ul) {
 			printf("invalid config\n");
 			return -1;
 		}
