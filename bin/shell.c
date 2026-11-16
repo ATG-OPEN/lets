@@ -28,6 +28,14 @@
  *   link /dev/port ttyS1; std /dev/port
  *
  * typed on ttyS1 gives the tty to the link with nothing read in between.
+ *
+ * Password (`passwd WORD`, in the startup script): a shell runs nothing on its input until the
+ * word is given there. It is asked once per input stream (a tty: once after power-up), and again
+ * when the input moves (`std`) or its driver says a new peer is on the other end
+ * (vfs_peer_new(): a packet port whose packets come from another address). A terminal shows
+ * "Password: " and does not echo; a link gets "Password:" after each line it sent while locked.
+ * A wrong word: no command runs, the rest of what was read is dropped and the shell reads
+ * nothing for SHELL_PASSWORD_DELAY ms. Only a 32-bit hash of the word is kept.
  */
 
 #include "../vfs/vfs.h"
@@ -49,6 +57,10 @@
 #endif
 
 #define SHELL_PROMPT "> "
+
+#ifndef SHELL_PASSWORD_DELAY
+#define SHELL_PASSWORD_DELAY 2000 /* ms after a wrong password */
+#endif
 #define SHELL_LINE_WAIT 5 /* polls with no input before a line with no end runs */
 
 /* keys */
@@ -85,6 +97,9 @@ typedef struct {
 #endif
 	char out[SHELL_OUT_SIZE];
 	unsigned int out_length;
+#ifndef SHELL_NO_PASSWORD
+	uint8_t granted; /* the input handle + 1 the password was given on, 0: none */
+#endif
 } shell_t;
 
 static shell_t shell_console;		   /* the one shell_initialize() starts */
@@ -128,6 +143,64 @@ void shell_wait(task_t *t)
 		shell->wait_entry = t->entry;
 	}
 }
+
+#ifndef SHELL_NO_PASSWORD
+static uint32_t shell_password; /* FNV-1a of the password, 0: none */
+static bool shell_asking;	/* the running shell is locked: its input is a password */
+static bool shell_refused;	/* a wrong password: wait before reading again */
+
+static uint32_t shell_hash(const char *word)
+{
+	uint32_t h = 2166136261u;
+
+	while (*word != '\0') {
+		h = (h ^ (uint8_t)*word++) * 16777619u;
+	}
+
+	return h | 1u; /* never 0, which is no password */
+}
+
+int shell_passwd(void *args, int argc, char *argv[])
+{
+	if (argc > 2) {
+		printf("usage: passwd [word]\n");
+		return -1;
+	}
+
+	shell_password = (argc == 2) ? shell_hash(argv[1]) : 0;
+
+	return 0;
+}
+
+/* true while the running shell wants the password on its input */
+static bool shell_locked(void)
+{
+	int in = vfs_stream(0);
+
+	if (vfs_peer_changed(0) || shell->granted != (uint8_t)(in + 1)) {
+		shell->granted = 0;
+	}
+
+	shell_asking = (shell_password != 0 && shell->granted == 0);
+
+	return shell_asking;
+}
+
+/* a line given while locked; the line is cleared from memory */
+static void shell_password_try(char *line)
+{
+	if (shell_hash(line) == shell_password) {
+		shell->granted = (uint8_t)(vfs_stream(0) + 1);
+		shell_asking = false;
+	} else {
+		shell_refused = true;
+	}
+
+	memset(line, 0, strlen(line));
+}
+#else
+#define shell_locked() false
+#endif
 
 /*
  * Runs a line typed here: commands split by ';' (not in quotes) run one after the other before
@@ -194,9 +267,21 @@ void shell_prompt_set(void (*prompt)(void))
 
 #ifndef SHELL_NO_TERMINAL
 
+/* the prompt, or "Password: " while the shell is locked */
+static void shell_prompt_show(void)
+{
+#ifndef SHELL_NO_PASSWORD
+	if (shell_asking) {
+		shell_print("Password: ");
+		return;
+	}
+#endif
+	shell_prompt_print();
+}
+
 static void shell_prompt(void)
 {
-	shell_prompt_print();
+	shell_prompt_show();
 	shell->prompted = true;
 }
 
@@ -443,6 +528,11 @@ static void shell_key(char c)
 	if (shell->escape == 2) {
 		shell->escape = 0;
 #if SHELL_HISTORY > 0
+#ifndef SHELL_NO_PASSWORD
+		if (shell_asking) {
+			return;
+		}
+#endif
 		if (c == 'A') {
 			shell_history_show(1);
 		} else if (c == 'B') {
@@ -455,6 +545,28 @@ static void shell_key(char c)
 	bool after_cr = shell->last_cr;
 
 	shell->last_cr = (c == '\r');
+
+#ifndef SHELL_NO_PASSWORD
+	/* the password: no echo, no history, no Tab */
+	if (shell_asking) {
+		if (c == '\r' || (c == '\n' && !after_cr)) {
+			shell_print("\r\n");
+			shell->buffer[shell->length] = '\0';
+			shell->length = 0;
+			shell->prompted = false;
+			shell_password_try(shell->buffer);
+		} else if (c == KEY_BACKSPACE || c == KEY_DELETE) {
+			shell->length -= (shell->length > 0) ? 1u : 0u;
+		} else if (c == KEY_CTRL_U || c == KEY_CTRL_C) {
+			shell->length = 0;
+		} else if (c == KEY_ESC) {
+			shell->escape = 1;
+		} else if ((unsigned char)c >= ' ' && shell->length < SHELL_BUFFER_SIZE - 1) {
+			shell->buffer[shell->length++] = c;
+		}
+		return;
+	}
+#endif
 
 	switch (c) {
 	case '\r':
@@ -532,7 +644,18 @@ static void shell_lines(bool all)
 
 		int in = vfs_stream(0);
 
-		if (n > 0) {
+		if (n > 0 && shell_locked()) {
+#ifndef SHELL_NO_PASSWORD
+			shell_password_try(buf);
+
+			if (shell_refused) {
+				shell_print("Password:\n");
+				shell_flush();
+				shell->length = 0; /* what came with it is dropped */
+				return;
+			}
+#endif
+		} else if (n > 0) {
 			shell_run(buf);
 		}
 
@@ -553,8 +676,8 @@ static void shell_lines(bool all)
 	}
 }
 
-/* the shell task: polls stdin every 10 ms */
-int shell_loop(void *args, uint64_t system_time)
+/* one poll of the shell */
+static int shell_poll(void *args)
 {
 	if (args != NULL) {
 		shell = args;
@@ -599,6 +722,7 @@ int shell_loop(void *args, uint64_t system_time)
 		char keys[16];
 
 		if (!shell->prompted) {
+			shell_locked();
 #if SHELL_HISTORY > 0
 			if (shell->history == NULL) {
 				/* only a terminal needs it; freed with the shell */
@@ -615,6 +739,8 @@ int shell_loop(void *args, uint64_t system_time)
 		int in = vfs_stream(0);
 		int size = read(0, keys, sizeof(keys));
 
+		shell_locked();
+
 		/* the keys after one that moved the input (`std`) were typed on the old one */
 		for (int i = 0; i < size && !task_stopping() && vfs_stream(0) == in; i++) {
 			shell_key(keys[i]);
@@ -623,6 +749,12 @@ int shell_loop(void *args, uint64_t system_time)
 			if (shell_waiting()) {
 				break;
 			}
+
+#ifndef SHELL_NO_PASSWORD
+			if (shell_refused) {
+				break; /* the next prompt after the wait */
+			}
+#endif
 
 			if (!shell->prompted && vfs_terminal() && !task_stopping()) {
 				shell_prompt(); /* the command is done: the next line */
@@ -649,6 +781,21 @@ int shell_loop(void *args, uint64_t system_time)
 	}
 
 	return 10;
+}
+
+/* the shell task: polls stdin every 10 ms */
+int shell_loop(void *args, uint64_t system_time)
+{
+	int ms = shell_poll(args);
+
+#ifndef SHELL_NO_PASSWORD
+	if (shell_refused) {
+		shell_refused = false;
+		ms = SHELL_PASSWORD_DELAY;
+	}
+#endif
+
+	return ms;
 }
 
 #ifndef VFS_NO_REDIRECT

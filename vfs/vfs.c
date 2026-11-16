@@ -784,8 +784,10 @@ typedef struct {
 	void *object;		   /* what the type's open() returned, or the node */
 	unsigned int position;	   /* a node's read position */
 	uint8_t holders;	   /* 0: a free entry */
-	uint8_t flags;		   /* open()'s */
+	uint8_t flags;		   /* open()'s, and VFS_FD_PEER */
 } vfs_fd_t;
+
+#define VFS_FD_PEER 0x80u /* the driver saw a new peer (vfs_peer_new()), not asked yet */
 
 static vfs_fd_t vfs_fds[VFS_FDS_MAX];
 static int8_t vfs_fd_served = -1; /* the handle a node's handler is called for */
@@ -872,6 +874,28 @@ int vfs_fd_now(void)
 	return vfs_fd_served;
 }
 
+void vfs_peer_new(void)
+{
+	vfs_fd_t *f = vfs_fd(vfs_fd_served);
+
+	if (f != NULL) {
+		f->flags |= VFS_FD_PEER;
+	}
+}
+
+bool vfs_peer_changed(int handle)
+{
+	vfs_fd_t *f = vfs_fd(vfs_stream(handle));
+
+	if (f == NULL || !(f->flags & VFS_FD_PEER)) {
+		return false;
+	}
+
+	f->flags &= (uint8_t)~VFS_FD_PEER;
+
+	return true;
+}
+
 unsigned int *vfs_position(void)
 {
 	return &vfs_fd(vfs_fd_served)->position;
@@ -900,6 +924,7 @@ int vfs_fd_read(int handle, void *buffer, unsigned int length)
 	}
 
 	if (f->type != NULL) {
+		vfs_fd_served = (int8_t)handle; /* for vfs_peer_new() */
 		return f->type->read(f->object, buffer, length);
 	}
 

@@ -47,6 +47,20 @@ int shell_initialize(void);
  */
 void shell_wait(task_t *t);
 
+/**
+ * @brief The `passwd` command: passwd WORD, in the startup script, locks every shell
+ *        until WORD is given on its input; `passwd` alone takes the password away.
+ *
+ * A shell asks once per input stream (a tty: once after power-up), and again when its
+ * input moves (`std`) or the input's driver signals a new peer (vfs_peer_new(), e.g. a
+ * packet port whose packets now come from another address). A terminal shows
+ * "Password: " and echoes nothing; a program link gets "Password:" back for each line
+ * it sent while locked. A wrong word runs nothing, drops the rest of what was read and
+ * makes the shell read nothing for SHELL_PASSWORD_DELAY ms (2000). Only a 32-bit hash
+ * of the word is kept in RAM. -DSHELL_NO_PASSWORD leaves it out.
+ */
+int shell_passwd(void *args, int argc, char *argv[]);
+
 /** @brief The `shell` command: shell [-t] < in > out, a shell on these streams. */
 int shell_start(void *args, int argc, char *argv[]);
 

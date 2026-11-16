@@ -106,6 +106,22 @@ static void queue_put(queue_t *q, const char *text)
 
 static vfs_handler_t queue_node = {.write_handler = sink_write, .read_handler = queue_read};
 
+/* a packet port: its driver says when the next read comes from another peer */
+static int peer_next;
+
+static int peer_read(void *args, void *buffer, unsigned int length)
+{
+	int n = queue_read(args, buffer, length);
+
+	if (n > 0 && peer_next) {
+		peer_next = 0;
+		vfs_peer_new();
+	}
+	return n;
+}
+
+static vfs_handler_t peer_node = {.write_handler = sink_write, .read_handler = peer_read};
+
 /* a port whose queue is full every other write, as a packet port's is: write() returns 0 */
 static char narrow[2048];
 static int ls_shown;
@@ -400,6 +416,54 @@ static int checks(void *args, uint64_t t)
 		CHECK(system("std sink") == 0);
 		sink_len = 0;
 		CHECK(write(1, "three\n", 6) == 6 && strcmp(sink, "three\n") == 0);
+
+		/* passwd: a link gets "Password:" and runs nothing until the word came on it */
+		CHECK(system("passwd a b") == -1 && system("passwd s3cret") == 0);
+		CHECK(system("std qa") == 0);
+		sink_len = 0;
+		sink[0] = '\0';
+		probes = 0;
+		queue_put(&qa, "probe a\nprobe b\n");
+		CHECK(shell_loop(NULL, 0) == 2000); /* refused: the shell waits */
+		CHECK(probes == 0 && strcmp(sink, "Password:\n") == 0);
+		queue_put(&qa, "s3cre\n");
+		CHECK(shell_loop(NULL, 0) == 2000 && probes == 0);
+		queue_put(&qa, "s3cret\nprobe c\n");
+		CHECK(shell_loop(NULL, 0) == 10 && probes == 1 && strcmp(last_arg, "c") == 0);
+		CHECK(strcmp(sink, "Password:\nPassword:\n") == 0); /* nothing echoed */
+		queue_put(&qa, "probe d\n");
+		shell_loop(NULL, 0);
+		CHECK(probes == 2); /* the same stream: asked once */
+
+		/* another stream asks again; on it, a new peer asks again too */
+		CHECK(vfs_node_create("qp", false, &qb, &peer_node) >= 0);
+		CHECK(system("std qp") == 0);
+		queue_put(&qb, "probe e\n");
+		CHECK(shell_loop(NULL, 0) == 2000 && probes == 2);
+		queue_put(&qb, "s3cret\nprobe f\n");
+		shell_loop(NULL, 0);
+		CHECK(probes == 3 && strcmp(last_arg, "f") == 0);
+		peer_next = 1;
+		queue_put(&qb, "probe g\n");
+		CHECK(shell_loop(NULL, 0) == 2000 && probes == 3);
+		peer_next = 1;
+		queue_put(&qb, "s3cret\nprobe h\n");
+		shell_loop(NULL, 0);
+		CHECK(probes == 4 && strcmp(last_arg, "h") == 0);
+
+		/* a terminal: "Password: ", no echo, then the prompt */
+		CHECK(system("std -t term") == 0);
+		sink_len = 0;
+		sink[0] = '\0';
+		type("probe i\r");
+		CHECK(probes == 4 && strstr(sink, "probe") == NULL);
+		CHECK(strncmp(sink, "Password: \r\n", 12) == 0);
+		type("s3cret\r");
+		CHECK(strstr(sink, "s3cret") == NULL && strstr(sink, "Password: \r\n> ") != NULL);
+		type("probe j\r");
+		CHECK(probes == 5 && strcmp(last_arg, "j") == 0);
+		CHECK(system("passwd") == 0);
+		CHECK(system("std sink") == 0);
 		step = 2;
 		return 0;
 	}

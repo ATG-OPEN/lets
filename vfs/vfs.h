@@ -425,6 +425,20 @@ int32_t vfs_fd_seek(int handle, int32_t offset, int whence);
 /** @brief For a node's handlers: the handle being served. */
 int vfs_fd_now(void);
 
+/**
+ * @brief For a read handler (a node's or a file system's): the peer on the other end of the
+ * stream being read is a new one, e.g. a packet port whose packets now come from another
+ * address. The handle keeps the mark until vfs_peer_changed() takes it; a shell with a
+ * password asks for it again (shell.h).
+ */
+void vfs_peer_new(void);
+
+/**
+ * @brief true once after the driver of @p handle (0, 1 and 2 follow the task's streams)
+ * called vfs_peer_new(); the mark is cleared.
+ */
+bool vfs_peer_changed(int handle);
+
 /** @brief For a node's handlers: the read position of the handle being served. */
 unsigned int *vfs_position(void);
 

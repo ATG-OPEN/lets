@@ -723,7 +723,11 @@ const vfs_command_t vfs_commands[] = {
 	{"df", bin_df},		{"echo", bin_echo},
 	{"kill", kill},		{"ls", bin_ls},
 	{"mkdir", bin_mkdir},	{"mount", bin_mount},
-	{"mv", bin_mv},		{"pwd", bin_pwd},
+	{"mv", bin_mv},
+#ifndef SHELL_NO_PASSWORD
+	{"passwd", shell_passwd},
+#endif
+	{"pwd", bin_pwd},
 	{"reboot", reboot_execute},	{"rm", bin_rm},
 	{"std", vfs_std_execute}, {"sync", bin_sync},
 	{"top", top},		{"touch", bin_touch},
