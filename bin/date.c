@@ -177,18 +177,18 @@ void date_format(uint32_t seconds, char *text)
 #endif
 }
 
-/* the number at *@p text, -1 if there is none */
-static long date_field(const char **text)
+/* the number at *@p text (at most 9999: more digits stop adding), -1 if there is none */
+static int date_field(const char **text)
 {
 	const char *p = *text;
-	long n = 0;
+	int n = 0;
 
 	if (*p < '0' || *p > '9') {
 		return -1;
 	}
 
-	while (*p >= '0' && *p <= '9') {
-		n = n * 10 + (*p++ - '0');
+	for (; *p >= '0' && *p <= '9'; p++) {
+		n = (n < 1000) ? n * 10 + (*p - '0') : 10000;
 	}
 
 	*text = p;
@@ -197,7 +197,7 @@ static long date_field(const char **text)
 }
 
 /* @p separator and then a number, -1 if not */
-static long date_next(const char **text, char separator)
+static int date_next(const char **text, char separator)
 {
 	if (**text != separator) {
 		return -1;
@@ -208,6 +208,12 @@ static long date_next(const char **text, char separator)
 	return date_field(text);
 }
 
+/* the end of what date_parse() reads */
+static bool date_end(char c)
+{
+	return c == '\0' || c == '\n' || c == '\r';
+}
+
 int date_parse(const char *text, uint32_t *seconds)
 {
 	const char *p = text;
@@ -215,11 +221,12 @@ int date_parse(const char *text, uint32_t *seconds)
 	if (*p == '@') {
 		uint32_t n = 0;
 
-		for (p++; *p >= '0' && *p <= '9'; p++) {
+		/* more than 10 digits, or more than 32 bits: not a time */
+		for (p++; *p >= '0' && *p <= '9' && n <= (0xFFFFFFFFul - 9u) / 10u; p++) {
 			n = n * 10u + (uint32_t)(*p - '0');
 		}
 
-		if (p == text + 1 || (*p != '\0' && *p != '\n' && *p != '\r')) {
+		if (p == text + 1 || !date_end(*p)) {
 			return -1;
 		}
 
@@ -228,10 +235,10 @@ int date_parse(const char *text, uint32_t *seconds)
 		return 0;
 	}
 
-	long y = date_field(&p);
-	long m = date_next(&p, '-');
-	long d = date_next(&p, '-');
-	long hour = 0, minute = 0, second = 0;
+	int y = date_field(&p);
+	int m = date_next(&p, '-');
+	int d = date_next(&p, '-');
+	int hour = 0, minute = 0, second = 0;
 
 	if (*p == ' ') {
 		hour = date_next(&p, ' ');
@@ -239,9 +246,10 @@ int date_parse(const char *text, uint32_t *seconds)
 		second = date_next(&p, ':');
 	}
 
-	if (y < 1970 || y > DATE_MAX_YEAR || m < 1 || m > 12 || d < 1 || d > 31 || hour < 0 ||
-	    hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 ||
-	    (*p != '\0' && *p != '\n' && *p != '\r')) {
+	/* a day the month has: no 31 April, no 29 February out of a leap year */
+	if (y < 1970 || y > DATE_MAX_YEAR || m < 1 || m > 12 || d < 1 ||
+	    (unsigned int)d > date_days((unsigned int)y, (unsigned int)m) || hour < 0 || hour > 23 ||
+	    minute < 0 || minute > 59 || second < 0 || second > 59 || !date_end(*p)) {
 		return -1;
 	}
 
@@ -256,7 +264,7 @@ int date_parse(const char *text, uint32_t *seconds)
 		days += date_days((unsigned int)y, i);
 	}
 
-	*seconds = days * DATE_DAY + (uint32_t)hour * 3600ul + (uint32_t)minute * 60ul +
+	*seconds = days * DATE_DAY + (uint32_t)((unsigned int)hour * 60u + (unsigned int)minute) * 60ul +
 		   (uint32_t)second;
 
 	return 0;

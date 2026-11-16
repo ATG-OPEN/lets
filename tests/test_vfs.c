@@ -907,6 +907,10 @@ static void test_tree(void)
 		CHECK(date_parse("@1793534400", &t) == 0 && t == 1793534400ul);
 		CHECK(date_parse("2026-13-01", &t) == -1 && date_parse("2026-11-01 25:00:00", &t) == -1);
 		CHECK(date_parse("yesterday", &t) == -1 && date_parse("2026-11", &t) == -1);
+		/* days the month does not have, and numbers too long for their field */
+		CHECK(date_parse("2026-02-29", &t) == -1 && date_parse("2026-04-31", &t) == -1);
+		CHECK(date_parse("2100-02-29", &t) == -1 && date_parse("2026-12-31", &t) == 0);
+		CHECK(date_parse("@99999999999", &t) == -1 && date_parse("19700-01-01", &t) == -1);
 
 		for (uint32_t s = 0; s < 4000000000ul; s += 86399ul * 37ul) {
 			date_format(s, text);
