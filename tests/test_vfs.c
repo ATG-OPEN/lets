@@ -720,8 +720,11 @@ static void test_tree(void)
 	/* raw device */
 	fd = open("/dev/ee0", 0, 0);
 	CHECK(fd > 2 && read(fd, chunk, 4) == 4 && memcmp(chunk, "TFS1", 4) == 0);
-	CHECK(lseek(fd, 0, 0) == 0);
+	CHECK(lseek(fd, 0, 0) == 0 && lseek(fd, 40000, 0) == 40000 && lseek(fd, 0, 2) == (off_t)CHIP_SIZE);
+	CHECK(lseek(fd, 1, 1) == -1 && lseek(fd, -1, 0) == -1);
 	close(fd);
+	fd = open("/dev/ee0", 0, 0); /* a new open starts at 0 */
+	CHECK(fd > 2 && read(fd, chunk, 4) == 4 && memcmp(chunk, "TFS1", 4) == 0 && close(fd) == 0);
 
 	/* handles, devices and files alike: a table of their own */
 	for (int i = 0; i < VFS_FD_FIRST + (int)VFS_FDS_MAX; i++)

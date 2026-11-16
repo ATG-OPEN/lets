@@ -705,24 +705,32 @@ static int vfs_blk_write(void *args, void *buffer, unsigned int length)
 	return (int)length;
 }
 
-static int vfs_blk_lseek(void *args, off_t offset, int whence)
+/* a 32-bit position: a node's lseek handler returns an int, 16 bits on a PIC24 */
+static int32_t vfs_blk_seek(vfs_blk_t *b, int32_t offset, int whence)
 {
-	vfs_blk_t *b = args;
-	int32_t base = (whence == 0) ? 0 : (whence == 1) ? (int32_t)b->pos : (int32_t)b->size;
+	int32_t to = offset + ((whence == 0) ? 0 : (whence == 1) ? (int32_t)b->pos : (int32_t)b->size);
 
-	if (base + (int32_t)offset < 0 || (uint32_t)(base + offset) > b->size) {
+	if (to < 0 || (uint32_t)to > b->size) {
 		return -1;
 	}
 
-	b->pos = (uint32_t)(base + offset);
+	b->pos = (uint32_t)to;
 
-	return (int)b->pos;
+	return to;
+}
+
+/* each open reads and writes from the start */
+static int vfs_blk_open(void *args, int flags)
+{
+	((vfs_blk_t *)args)->pos = 0;
+
+	return 0;
 }
 
 static const vfs_handler_t vfs_blk_handlers = {
+	.open_handler = vfs_blk_open,
 	.read_handler = vfs_blk_read,
 	.write_handler = vfs_blk_write,
-	.lseek_handler = vfs_blk_lseek,
 };
 
 int vfs_blk_register(const char *name, vfs_blk_t *blk)
@@ -966,6 +974,10 @@ int32_t vfs_fd_seek(int handle, int32_t offset, int whence)
 	}
 
 	vfs_node_t *n = vfs_fd_serve(handle);
+
+	if (n->handlers == &vfs_blk_handlers) {
+		return vfs_blk_seek(n->args, offset, whence);
+	}
 
 	return (n->handlers->lseek_handler == NULL) ?
 		       -1 :
