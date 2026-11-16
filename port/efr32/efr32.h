@@ -132,8 +132,8 @@ typedef struct {
 
 int efr32_flash_init(efr32_flash_t *f, uint32_t base);
 
-/** Writes what waits now (before a reset). */
-void efr32_flash_sync(efr32_flash_t *f);
+/** Writes what waits now (before a reset). 0, or -1 when the flash failed (it is tried again). */
+int efr32_flash_sync(efr32_flash_t *f);
 
 /** Raw flash: erase the page at @p addr; program @p n words (4-byte aligned). 0: done. */
 int efr32_flash_erase(uint32_t addr);

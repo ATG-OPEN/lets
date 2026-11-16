@@ -113,30 +113,38 @@ static bool page_valid(const uint32_t *p, uint32_t *gen)
 	return *gen != 0xFFFFFFFFu;
 }
 
-void efr32_flash_sync(efr32_flash_t *f)
+int efr32_flash_sync(efr32_flash_t *f)
 {
 	if (!f->dirty) {
-		return;
+		return 0;
 	}
 
 	uint8_t next = f->live ^ 1u;
 	uint32_t addr = f->base + (uint32_t)next * EFR32_FLASH_PAGE;
 	uint32_t trailer[2] = {FLASH_MAGIC, f->gen + 1u};
 
-	efr32_flash_erase(addr);
-	efr32_flash_program(addr, (const uint32_t *)f->data, EFR32_FLASH_DATA / 4u);
-	efr32_flash_program(addr + EFR32_FLASH_DATA, trailer, 2);
+	/*
+	 * A page that failed is not live: the next try goes to it again, and the page before
+	 * stays the one a reset finds (moving on would erase that one next). Again in 0.3 s.
+	 */
+	if (efr32_flash_erase(addr) < 0 ||
+	    efr32_flash_program(addr, (const uint32_t *)f->data, EFR32_FLASH_DATA / 4u) < 0 ||
+	    efr32_flash_program(addr + EFR32_FLASH_DATA, trailer, 2) < 0) {
+		f->dirty_at = (uint32_t)(task_get_system_time() / 1000u);
+		return -1;
+	}
 
 	f->gen++;
 	f->live = next;
 	f->dirty = false;
+
+	return 0;
 }
 
 /* vfs_sync(): `sync`, `reboot` */
 static int flash_sync(vfs_blk_t *blk)
 {
-	efr32_flash_sync((efr32_flash_t *)blk);
-	return 0;
+	return efr32_flash_sync((efr32_flash_t *)blk);
 }
 
 static int flash_read(vfs_blk_t *blk, uint32_t addr, void *buffer, unsigned int length)
