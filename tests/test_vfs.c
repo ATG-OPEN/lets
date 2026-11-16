@@ -994,6 +994,36 @@ static void test_tree(void)
 	CHECK(system("ed ~/new 3d") == 0 && system("ed ~/new 2d") == 0 && system("ed ~/new 1d") == 0);
 	CHECK(read_all("~/new", buf, sizeof(buf)) == 0 && system("ed ~/new 1d") == -1);
 
+	/* ed: a file of 1200 bytes with 500 bytes of heap free (the file system holds both versions) */
+	{
+		int bf = open("~/big", O_WRONLY | O_CREAT | O_TRUNC, 0);
+
+		for (int i = 1; i <= 24; i++) {
+			char line[64];
+			int n = snprintf(line, sizeof(line), "line %02d .........................................\n", i);
+
+			CHECK(n == 50 && write(bf, line, (unsigned)n) == n);
+		}
+
+		CHECK(close(bf) == 0);
+
+		void *fill = malloc(alloc_free_size() - 500u);
+
+		CHECK(fill != NULL && alloc_free_size() < 600u);
+		CHECK(system("ed ~/big 20c twenty") == 0 && system("ed ~/big 24a end") == 0);
+		free(fill);
+
+		static char big[1400];
+		int fd = open("~/big", O_RDONLY, 0);
+		int n = read(fd, big, sizeof(big) - 1u);
+
+		close(fd);
+		big[n < 0 ? 0 : n] = '\0';
+		CHECK(n == 23 * 50 + 7 + 4 && strstr(big, "line 19 .........................................\ntwenty\nline 21") != NULL);
+		CHECK(strcmp(big + n - 54, "line 24 .........................................\nend\n") == 0);
+		CHECK(system("rm ~/big") == 0);
+	}
+
 	CHECK(system("cd") == 0 && vfs_dir_path(vfs_cwd(), buf, sizeof(buf)) == 0);
 	CHECK(strcmp(buf, "/home") == 0);
 	CHECK(system("std -t term") == 0);

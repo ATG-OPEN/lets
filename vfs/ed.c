@@ -3,9 +3,10 @@
 
 /*
  * ed: a line editor in one command per edit, after Unix ed's a / i / c / d.
- * The file is read, changed in one buffer and written back once with
- * O_TRUNC, so an edit is all or nothing on a vfs file system. Nothing stays
- * in memory between commands.
+ * The file is copied to a new version of itself (O_TRUNC) a piece at a time,
+ * with the edit made on the way, so an edit is all or nothing on a vfs file
+ * system and a file larger than the free heap can be edited. Nothing stays in
+ * memory between commands.
  */
 
 #include "vfs.h"
@@ -16,28 +17,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef ED_FILE_MAX
-#define ED_FILE_MAX 1024 /* largest file ed takes, in bytes */
-#endif
+#define ED_PIECE 16 /* bytes copied at a time, on the stack */
 
 static int ed_usage(void)
 {
 	printf("usage: ed FILE [Na|Ni|Nc TEXT | Nd]\n");
 	return -1;
-}
-
-/* where line @n (from 1) starts; past the last line: @size */
-static int ed_line(const char *text, int size, long n)
-{
-	int at = 0;
-
-	while (--n > 0 && at < size) {
-		const char *nl = memchr(text + at, '\n', (size_t)(size - at));
-
-		at = (nl == NULL) ? size : (int)(nl - text) + 1;
-	}
-
-	return at;
 }
 
 /*
@@ -166,6 +151,25 @@ static int ed_list(const char *path)
 	return lines_run("ed", &e->lines);
 }
 
+/* 0 when all of it was written, else -1 */
+static int ed_put(int fd, const char *data, unsigned int n)
+{
+	return (write(fd, (void *)data, n) == (int)n) ? 0 : -1;
+}
+
+/* the new line: the words after the command, one space apart, and its '\n' */
+static int ed_insert(int fd, int argc, char *argv[])
+{
+	int r = 0;
+
+	for (int i = 3; i < argc; i++) {
+		r |= ed_put(fd, argv[i], strlen(argv[i]));
+		r |= ed_put(fd, " ", (i < argc - 1) ? 1u : 0u);
+	}
+
+	return r | ed_put(fd, "\n", 1);
+}
+
 int vfs_ed(void *args, int argc, char *argv[])
 {
 	if (argc < 2 || strcmp(argv[1], "-help") == 0) {
@@ -176,108 +180,91 @@ int vfs_ed(void *args, int argc, char *argv[])
 		return ed_list(argv[1]);
 	}
 
-	/* the new line: the words after the command, one space apart */
-	int length = (argc > 3) ? argc - 4 : 0;
-
-	for (int i = 3; i < argc; i++) {
-		length += (int)strlen(argv[i]);
-	}
-
-	int add = length + 2; /* and its '\n', and one before it if the file has none at the end */
-
-	int fd = open(argv[1], O_RDONLY, 0);
-	long end = (fd < 0) ? 0 : (long)lseek(fd, 0, SEEK_END);
-
-	/* a file has a size; a device has none */
-	if (end < 0 || end > ED_FILE_MAX || (fd >= 0 && lseek(fd, 0, SEEK_SET) != 0)) {
-		close(fd);
-		printf(end < 0 ? "not a file\n" : "too long\n");
-		return -1;
-	}
-
-	char *text = malloc((size_t)end + (size_t)add);
-
-	if (text == NULL) {
-		close(fd);
-		printf("out of memory\n");
-		return -1;
-	}
-
-	int size = (fd < 0) ? 0 : read(fd, text, (unsigned int)end);
-
-	close(fd);
-	size = (size < 0) ? 0 : size;
-
-	int lines = 0;
-
-	for (int i = 0; i < size; i++) {
-		lines += (text[i] == '\n' || i == size - 1);
-	}
-
-	int r = 0;
-
 	char *op = NULL;
 	long n = strtol(argv[2], &op, 10);
 	char c = *op;
 
-	/* a: after 0 .. lines; i: before 1 .. lines + 1; c, d: 1 .. lines */
-	bool ok = op != argv[2] && op[0] != '\0' && op[1] == '\0' && strchr("aicd", c) != NULL &&
-		  n >= (c == 'a' ? 0 : 1) && n <= lines + (c == 'a' || c == 'i') &&
-		  (c != 'd' || argc == 3);
-
-	if (!ok) {
-		free(text);
+	/* a: after 0 .. lines; i: before 1 .. lines + 1; c, d: 1 .. lines (lines: checked at the end) */
+	if (op == argv[2] || op[0] == '\0' || op[1] != '\0' || strchr("aicd", c) == NULL ||
+	    n < (c == 'a' ? 0 : 1) || n > 32000 || (c == 'd' && argc != 3)) {
 		return ed_usage();
 	}
 
-	int at = ed_line(text, size, (c == 'a') ? n + 1 : n);
+	char piece[ED_PIECE];
+	int in = open(argv[1], O_RDONLY, 0);
+	long end = (in < 0) ? 0 : (long)lseek(in, 0, SEEK_END);
 
-	if (c == 'c' || c == 'd') {
-		int next = ed_line(text, size, n + 1);
-
-		memmove(text + at, text + next, (size_t)(size - next));
-		size -= next - at;
+	/* a file has a size; a device has none */
+	if (end < 0 || (in >= 0 && lseek(in, 0, SEEK_SET) != 0)) {
+		close(in);
+		printf("not a file\n");
+		return -1;
 	}
 
-	if (c != 'd') {
-		/* after a last line without '\n': give it one first */
-		if (at == size && size > 0 && text[size - 1] != '\n') {
-			text[size++] = '\n';
-			at = size;
-		}
+	/* the new line goes in before line `add` (0: none), line `drop` is left out (0: none) */
+	unsigned int add = (c == 'd') ? 0u : (unsigned int)n + (c == 'a');
+	unsigned int drop = (c == 'c' || c == 'd') ? (unsigned int)n : 0u;
+	unsigned int line = 1;
+	char last = '\n';
+	int k;
+	int out = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0);
+	int r = (out < 0) ? -1 : 0;
 
-		memmove(text + at + length + 1, text + at, (size_t)(size - at));
+	/* the file as it was, a piece at a time: the parts to keep in runs, the new line where it goes */
+	while (r >= 0 && in >= 0 && (k = read(in, piece, sizeof(piece))) > 0) {
+		int run = 0;
 
-		for (int i = 3; i < argc; i++) {
-			int w = (int)strlen(argv[i]);
+		for (int i = 0; i < k; i++) {
+			bool start = (i == 0) ? (last == '\n') : (piece[i - 1] == '\n');
 
-			memcpy(text + at, argv[i], (size_t)w);
-			at += w;
-
-			if (i < argc - 1) {
-				text[at++] = ' ';
+			if (start && (line == add || line == drop)) {
+				r |= ed_put(out, piece + run, (unsigned int)(i - run));
+				run = i;
 			}
+
+			if (start && line == add) {
+				r |= ed_insert(out, argc, argv);
+				add = 0;
+			}
+
+			if (line == drop) {
+				run = i + 1;
+			}
+
+			line += (piece[i] == '\n');
 		}
 
-		text[at] = '\n';
-		size += length + 1;
+		r |= ed_put(out, piece + run, (unsigned int)(k - run));
+		last = piece[k - 1];
 	}
 
-	fd = open(argv[1], O_WRONLY | O_CREAT | O_TRUNC, 0);
+	close(in);
 
-	if (fd < 0 || write(fd, text, (unsigned int)size) != size) {
-		printf("write failed\n");
-		r = -1;
+	/* the file's lines (a last one without '\n' counts too): n must have been one of them */
+	unsigned int lines = line - 1u + (last != '\n');
+	bool ok = (unsigned int)n <= lines + (c == 'a' || c == 'i');
+
+	/* at the end: after a last line without '\n', give it one first */
+	if (ok && add > 0 && last != '\n') {
+		r |= ed_put(out, "\n", 1);
+	}
+
+	if (ok && add > 0) {
+		r |= ed_insert(out, argc, argv);
 	}
 
 	/* an edit that failed must not replace what was there */
-	if (r < 0) {
-		vfs_file_abort(fd);
-	} else {
-		close(fd);
+	if (r < 0 || !ok) {
+		vfs_file_abort(out);
+	} else if (close(out) == 0) {
+		return 0;
 	}
 
-	free(text);
+	if (!ok) {
+		return ed_usage();
+	}
 
-	return r;
+	printf("write failed\n");
+
+	return -1;
 }

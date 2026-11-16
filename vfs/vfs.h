@@ -502,9 +502,10 @@ void vfs_interpreter_set(int (*run)(void *args, int argc, char *argv[]));
  * vfs_register_app("ed", vfs_ed);
  * @endcode
  * ed FILE lists it numbered; ed FILE Nc TEXT changes line N, Na adds after
- * it (0a: first), Ni inserts before it, Nd deletes it. The whole file is in
- * RAM during the command only (up to ED_FILE_MAX, 1024 bytes) and is written
- * back at once with O_TRUNC.
+ * it (0a: first), Ni inserts before it, Nd deletes it. The file is copied to
+ * a new version of itself (O_TRUNC) 16 bytes at a time with the edit made on
+ * the way, so a file larger than the free heap can be edited, and an edit
+ * that fails (or a line number past the end) leaves the file as it was.
  */
 int vfs_ed(void *args, int argc, char *argv[]);
 
