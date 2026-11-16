@@ -43,6 +43,14 @@ Handles 0 / 1 / 2 are stdin / stdout / stderr. They go through the running task'
 `std <node>` points the default at a node (a UART, a network port); the shell reads its commands from handle 0. `printf` ends up in `write(1, ...)`,
 which is line buffered (128 bytes).
 
+**The shell password.** Every shell asks for a password on its input before it runs anything:
+once per stream (a tty once after power-up), and again when the stream's driver calls
+`vfs_peer_new()` (a packet port whose packets come from another address). The built-in default
+is `SHELL_PASSWORD_DEFAULT`, **"123456", which everyone knows**: put `passwd WORD` in the
+board's startup script. `passwd -` switches it off (for a board whose shell is driven by a
+program that does not log in); `-DSHELL_PASSWORD_DEFAULT=\"\"` builds without a default and
+`-DSHELL_NO_PASSWORD` without the password at all.
+
 ## XC16
 
 The kernel's `open`, `read`, `write`, `close`, `lseek`, `system`, `malloc` and `free` are placed

@@ -100,7 +100,7 @@ Each difference is marked:
 | `test`, `[`, `true`, `false` | `if` in argscript | keep |
 | `reboot`, `sync` | The same: `reboot` syncs first and lets the ttys drain | keep |
 | Terminals have `stty` | `std -t` or `shell -t` | keep |
-| `login`, `passwd` | `passwd WORD` in the startup script: every shell asks for it once per input stream (a tty once after power-up), and again when the stream's driver signals a new peer (`vfs_peer_new()`, a packet port); no users | keep |
+| `login`, `passwd` | A shell password, default `123456` (a known default: change it with `passwd WORD` in the startup script; `passwd -` off; build option `SHELL_PASSWORD_DEFAULT`): every shell asks for it once per input stream (a tty once after power-up), and again when the stream's driver signals a new peer (`vfs_peer_new()`, a packet port); no users | keep |
 
 `std` has no Linux equivalent. It is the console: where a task with no streams of its own reads and
 writes. `ed` takes its edits as arguments, as `sed` would, because there is no full-screen editor.

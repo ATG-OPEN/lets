@@ -16,8 +16,10 @@ board can be configured, tested and driven over a serial line without reflashing
   `ls > log` or `shell -t < ttyS1 > ttyS1` redirect as on Linux.
 - **A shell for people and programs**: `std -t ttyS1` gives a terminal with line editing,
   Tab completion and history (use `screen`, PuTTY, ...); `std ttyS1` gives a program whole
-  command lines and plain replies. `passwd WORD` in the startup script locks every shell
-  until the word is given on its input (once per stream, again for a new peer on a port).
+  command lines and plain replies. Every shell asks for a password on its input (once per
+  stream, again for a new peer on a port). **The built-in default is `123456`, known to
+  everyone: set your own with `passwd WORD` in the startup script** (`passwd -` switches it
+  off; `SHELL_PASSWORD_DEFAULT` sets the default at build time).
 - **The C library, provided by vfs**: `open`, `read`, `write`, `close`, `lseek`,
   `system`, `malloc`, `free` (XC16 links them from the kernel). A fixed heap: when a task
   ends, what it owns is freed, its argument and what it got from `task_alloc()`.

@@ -49,7 +49,13 @@ void shell_wait(task_t *t);
 
 /**
  * @brief The `passwd` command: passwd WORD, in the startup script, locks every shell
- *        until WORD is given on its input; `passwd` alone takes the password away.
+ *        until WORD is given on its input; `passwd -` switches the password off.
+ *
+ * **A default is built in: SHELL_PASSWORD_DEFAULT, "123456".** It is known to everyone:
+ * set your own with `passwd WORD` in the startup script (or build with
+ * -DSHELL_PASSWORD_DEFAULT=\"...\"). Without a `passwd` line every shell asks for the
+ * default. -DSHELL_PASSWORD_DEFAULT=\"\" builds without a default (no password until
+ * `passwd WORD`).
  *
  * A shell asks once per input stream (a tty: once after power-up), and again when its
  * input moves (`std`) or the input's driver signals a new peer (vfs_peer_new(), e.g. a

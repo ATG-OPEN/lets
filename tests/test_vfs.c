@@ -514,6 +514,7 @@ static void test_tree(void)
 	CHECK(vfs_initialize() == 0);
 	shell_initialize();
 	CHECK(vfs_bin_initialize() == 0);
+	CHECK(system("passwd -") == 0); /* no shell password here: the default would ask for 123456 */
 
 	/* a plain node is in /dev and found by its bare name from anywhere */
 	CHECK(vfs_node_create("ttyS1", false, NULL, &sink_node) >= 0);

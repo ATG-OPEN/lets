@@ -85,7 +85,7 @@ typedef struct {
 	unsigned head, tail;
 } queue_t;
 
-static queue_t qa, qb;
+static queue_t qa, qb, qd;
 
 static int queue_read(void *args, void *buffer, unsigned int length)
 {
@@ -348,6 +348,17 @@ static int checks(void *args, uint64_t t)
 		/* stdout redirection: `std <node>` sends handle 1 to it, line buffered */
 		sink_len = 0;
 		sink[0] = '\0';
+		/* the built-in default password (SHELL_PASSWORD_DEFAULT) until the startup script sets one */
+		CHECK(vfs_node_create("qd", false, &qd, &queue_node) >= 0 && system("std qd") == 0);
+		probes = 0;
+		queue_put(&qd, "probe d\n");
+		CHECK(shell_loop(NULL, 0) == 2000 && probes == 0);
+		queue_put(&qd, "123456\nprobe d\n");
+		shell_loop(NULL, 0);
+		CHECK(probes == 1);
+		CHECK(system("passwd -") == 0); /* off: the tests below run without one */
+		sink_len = 0;
+		sink[0] = '\0';
 		CHECK(system("std sink") == 0);
 		CHECK(write(1, "line one\n", 9) == 9);
 		CHECK(strcmp(sink, "line one\n") == 0);
@@ -462,7 +473,7 @@ static int checks(void *args, uint64_t t)
 		CHECK(strstr(sink, "s3cret") == NULL && strstr(sink, "Password: \r\n> ") != NULL);
 		type("probe j\r");
 		CHECK(probes == 5 && strcmp(last_arg, "j") == 0);
-		CHECK(system("passwd") == 0);
+		CHECK(system("passwd") == -1 && system("passwd -") == 0);
 		CHECK(system("std sink") == 0);
 		step = 2;
 		return 0;

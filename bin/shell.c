@@ -29,8 +29,9 @@
  *
  * typed on ttyS1 gives the tty to the link with nothing read in between.
  *
- * Password (`passwd WORD`, in the startup script): a shell runs nothing on its input until the
- * word is given there. It is asked once per input stream (a tty: once after power-up), and again
+ * Password: a shell runs nothing on its input until the password is given there. Built in is
+ * SHELL_PASSWORD_DEFAULT ("123456", a known default: change it with `passwd WORD` in the
+ * startup script; `passwd -` switches it off; -DSHELL_PASSWORD_DEFAULT=\"\" builds without). It is asked once per input stream (a tty: once after power-up), and again
  * when the input moves (`std`) or its driver says a new peer is on the other end
  * (vfs_peer_new(): a packet port whose packets come from another address). A terminal shows
  * "Password: " and does not echo; a link gets "Password:" after each line it sent while locked.
@@ -57,6 +58,10 @@
 #endif
 
 #define SHELL_PROMPT "> "
+
+#ifndef SHELL_PASSWORD_DEFAULT
+#define SHELL_PASSWORD_DEFAULT "123456" /* known to everyone: set your own in the startup script */
+#endif
 
 #ifndef SHELL_PASSWORD_DELAY
 #define SHELL_PASSWORD_DELAY 2000 /* ms after a wrong password */
@@ -146,6 +151,7 @@ void shell_wait(task_t *t)
 
 #ifndef SHELL_NO_PASSWORD
 static uint32_t shell_password; /* FNV-1a of the password, 0: none */
+static bool shell_password_set; /* passwd ran, or the default is taken */
 static bool shell_asking;	/* the running shell is locked: its input is a password */
 static bool shell_refused;	/* a wrong password: wait before reading again */
 
@@ -162,12 +168,13 @@ static uint32_t shell_hash(const char *word)
 
 int shell_passwd(void *args, int argc, char *argv[])
 {
-	if (argc > 2) {
-		printf("usage: passwd [word]\n");
+	if (argc != 2) {
+		printf("usage: passwd WORD | passwd -\n");
 		return -1;
 	}
 
-	shell_password = (argc == 2) ? shell_hash(argv[1]) : 0;
+	shell_password = (strcmp(argv[1], "-") == 0) ? 0 : shell_hash(argv[1]);
+	shell_password_set = true;
 
 	return 0;
 }
@@ -176,6 +183,11 @@ int shell_passwd(void *args, int argc, char *argv[])
 static bool shell_locked(void)
 {
 	int in = vfs_stream(0);
+
+	if (!shell_password_set) {
+		shell_password_set = true;
+		shell_password = (SHELL_PASSWORD_DEFAULT[0] != '\0') ? shell_hash(SHELL_PASSWORD_DEFAULT) : 0;
+	}
 
 	if (vfs_peer_changed(0) || shell->granted != (uint8_t)(in + 1)) {
 		shell->granted = 0;
