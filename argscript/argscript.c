@@ -927,7 +927,9 @@ static as_state_t *as_new(const char *name, as_reader_t read, const char *src, c
 	s->read = read;
 	s->src = src;
 	s->cwd = task_streams()->cwd;
-	memcpy(s->path, path, size);
+	if (size != 0u) {
+		memcpy(s->path, path, size);
+	}
 
 	if (task_create(name, as_task, s) == NULL) {
 		free(s);

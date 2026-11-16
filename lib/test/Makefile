@@ -7,7 +7,7 @@ all: $(TESTS)
 	@for t in $(TESTS); do ./$$t || exit 1; done
 
 test_byte8: test_byte8.c ../byte8.c ../byte8.h
-	$(CC) $(CFLAGS) -Dread=test_read -Dwrite=test_write -o $@ test_byte8.c ../byte8.c
+	$(CC) $(CFLAGS) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -Dread=test_read -Dwrite=test_write -o $@ test_byte8.c ../byte8.c
 
 clean:
 	rm -rf $(TESTS) *.dSYM
