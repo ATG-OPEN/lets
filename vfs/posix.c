@@ -478,20 +478,41 @@ int __attribute__((__section__(".libc.system"))) system(const char *input)
 int k_printf(const char *format, ...)
 {
 	char text[256];
+	char *out = text;
 	va_list list;
+	va_list again;
 
 	va_start(list, format);
+	va_copy(again, list);
 
 	int n = vsnprintf(text, sizeof(text), format, list);
 
-	va_end(list);
+	/* longer than text: made again in a block from the heap (cut only when there is none) */
+	if (n >= (int)sizeof(text)) {
+		char *big = malloc((size_t)n + 1u);
 
-	if (vfs_stream(1) >= 0 && n > 0) {
-		unsigned int size = (n < (int)sizeof(text)) ? (unsigned int)n : sizeof(text) - 1u;
-
-		return (write(1, text, size) < 0) ? -1 : n;
+		if (big != NULL) {
+			vsnprintf(big, (size_t)n + 1u, format, again);
+			out = big;
+		}
 	}
 
-	return fputs(text, stdout) < 0 ? -1 : n;
+	va_end(again);
+	va_end(list);
+
+	unsigned int size = (out == text && n >= (int)sizeof(text)) ? sizeof(text) - 1u : (unsigned int)n;
+	int r;
+
+	if (vfs_stream(1) >= 0 && n > 0) {
+		r = (write(1, out, size) < 0) ? -1 : n;
+	} else {
+		r = (fputs(out, stdout) < 0) ? -1 : n;
+	}
+
+	if (out != text) {
+		free(out);
+	}
+
+	return r;
 }
 #endif

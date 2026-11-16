@@ -468,6 +468,20 @@ static int cmd_probe(void *args, int argc, char *argv[])
 	return 7;
 }
 
+/* a line longer than printf()'s own buffer (256) */
+static int cmd_long(void *args, int argc, char *argv[])
+{
+	char line[401];
+
+	for (int i = 0; i < 400; i++) {
+		line[i] = (char)('a' + i % 26);
+	}
+
+	line[400] = '\0';
+
+	return printf("%s|\n", line) == 402 ? 0 : -1;
+}
+
 /* what a command prints with printf: the console `std` gave, ttyS1 (the sink) here; what the
  * sink held before is kept */
 static const char *capture(const char *command)
@@ -951,6 +965,11 @@ static void test_tree(void)
 		CHECK(strcmp(capture("date +%s.%N"), "1794747607.459250\n") == 0);
 		fake_us = 0;			/* as before: no clock */
 	}
+
+	/* printf: a line longer than its buffer is not cut */
+	CHECK(vfs_register_app("long", cmd_long) == 0);
+	const char *got = capture("long");
+	CHECK(strlen(got) == 402 && strncmp(got + 390, "abcdefghij|\n", 12) == 0);
 
 	/* ed: one line per command */
 	CHECK(vfs_register_app("ed", vfs_ed) == 0);
