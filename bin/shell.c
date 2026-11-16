@@ -93,7 +93,6 @@ typedef struct {
 	bool last_cr;	     /* the previous key was '\r' (a "\r\n" Enter) */
 	uint8_t escape;	     /* 0, or 1 after ESC, 2 after ESC [ */
 	uint8_t idle;	     /* polls with no input, on a link */
-	bool in_command;     /* a command typed here runs now: shell_wait() is for this shell */
 	task_t *wait;	     /* a task a command left running: no prompt, no input until it ends */
 	int (*wait_entry)(void *arg, uint64_t system_time); /* its function: the slot may be reused */
 #if SHELL_HISTORY > 0
@@ -110,6 +109,7 @@ typedef struct {
 static shell_t shell_console;		   /* the one shell_initialize() starts */
 static shell_t *shell = &shell_console;	   /* the one running */
 static bool shell_console_idle;		   /* it is there, and no console yet */
+static shell_t *shell_typed;		   /* the shell whose typed line runs now, else NULL */
 
 static void shell_flush(void)
 {
@@ -143,9 +143,10 @@ void shell_write(const void *data, unsigned int length)
 
 void shell_wait(task_t *t)
 {
-	if (t != NULL && shell->in_command) {
-		shell->wait = t;
-		shell->wait_entry = t->entry;
+	/* not `shell`: outside a typed line it may be a shell that was stopped and freed */
+	if (t != NULL && shell_typed != NULL) {
+		shell_typed->wait = t;
+		shell_typed->wait_entry = t->entry;
 	}
 }
 
@@ -220,7 +221,7 @@ static void shell_password_try(char *line)
  */
 static void shell_run(char *line)
 {
-	shell->in_command = true;
+	shell_typed = shell;
 
 	while (line != NULL && !task_stopping()) {
 		char *command = line;
@@ -240,7 +241,7 @@ static void shell_run(char *line)
 		system(command);
 	}
 
-	shell->in_command = false;
+	shell_typed = NULL;
 }
 
 /* a command's task still runs: true while the shell waits for it */

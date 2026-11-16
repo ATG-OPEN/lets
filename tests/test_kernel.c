@@ -588,6 +588,32 @@ static int checks(void *args, uint64_t t)
 		CHECK(alloc_free_size() < heap); /* it made its history */
 		CHECK(system("kill shell") == 0 && alloc_free_size() == heap);
 
+		/* the stopped shell's memory, taken by others: a command that leaves a task (top),
+		 * run outside a typed line, writes nothing into it */
+		{
+			unsigned char *held[24];
+			unsigned int sizes[24], n = 0;
+
+			for (unsigned int size = 4096; size >= 32; size /= 2) {
+				while (n < 24 && alloc_free_size() > size + 400 && (held[n] = malloc(size)) != NULL) {
+					memset(held[n], 0xFF, size);
+					sizes[n++] = size;
+				}
+			}
+
+			CHECK(system("top > toplog") == 0); /* a RAM file: full soon, top ends */
+
+			bool intact = true;
+
+			for (unsigned int i = 0; i < n; i++) {
+				for (unsigned int k = 0; k < sizes[i]; k++) {
+					intact = intact && held[i][k] == 0xFF;
+				}
+				free(held[i]);
+			}
+			CHECK(intact);
+		}
+
 		/* on a link, lines: two in one read, one in two reads, one with no end */
 		sink_len = 0;
 		sink[0] = '\0';
