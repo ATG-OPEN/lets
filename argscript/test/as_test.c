@@ -6,7 +6,8 @@
  *
  *   cc -std=c99 -Wall -Wextra -include fcntl.h -Dopen=t_open -Dread=t_read \
  *      -Dwrite=t_write -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek \
- *      as_test.c ../argscript.c -o as_test && ./as_test
+ *      -Dmalloc=t_malloc -Dfree=t_free -Dprintf=t_printf \
+ *      as_test.c ../argscript.c ../../lib/args.c -o as_test && ./as_test
  */
 
 #include "../argscript.h"
@@ -15,7 +16,97 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
+
+/* argscript.c gets malloc, free and printf as t_malloc, t_free and t_printf (below); here they
+ * are the C library's */
+#undef malloc
+#undef free
+#undef printf
+void *malloc(size_t size);
+void free(void *p);
+int printf(const char *format, ...);
+
+static void log_add(const char *text);
+
+/* ------------------------------- fake heap -------------------------------- */
+/* blocks with their size and owner, as the kernel's: a stopped task's blocks are freed */
+
+#define BLOCKS 64
+
+static struct {
+	void *p;
+	size_t size;
+	int owner;
+} blocks[BLOCKS];
+static size_t heap_used, heap_peak;
+
+void *t_malloc(size_t size)
+{
+	for (int i = 0; i < BLOCKS; i++) {
+		if (blocks[i].p == NULL) {
+			blocks[i].p = malloc(size);
+			blocks[i].size = size;
+			blocks[i].owner = -1;
+			heap_used += size;
+			heap_peak = (heap_used > heap_peak) ? heap_used : heap_peak;
+			return blocks[i].p;
+		}
+	}
+
+	return NULL;
+}
+
+void t_free(void *p)
+{
+	for (int i = 0; p != NULL && i < BLOCKS; i++) {
+		if (blocks[i].p == p) {
+			free(p);
+			blocks[i].p = NULL;
+			heap_used -= blocks[i].size;
+			return;
+		}
+	}
+}
+
+int alloc_change_owner(void *p, int owner)
+{
+	for (int i = 0; p != NULL && i < BLOCKS; i++) {
+		if (blocks[i].p == p) {
+			blocks[i].owner = owner;
+			return 0;
+		}
+	}
+
+	return -1;
+}
+
+static void free_owner(int owner)
+{
+	for (int i = 0; i < BLOCKS; i++) {
+		if (blocks[i].p != NULL && blocks[i].owner == owner) {
+			t_free(blocks[i].p);
+		}
+	}
+}
+
+/* what the script prints (errors) goes to the log too, in braces */
+int t_printf(const char *format, ...)
+{
+	char text[128] = "{";
+	va_list list;
+
+	va_start(list, format);
+	int n = vsnprintf(text + 1, sizeof(text) - 2, format, list);
+	va_end(list);
+
+	text[strcspn(text, "\n")] = '\0';
+	strcat(text, "}");
+	log_add(text);
+
+	return n;
+}
 
 /* ------------------------------ fake kernel ------------------------------- */
 
@@ -38,6 +129,22 @@ int task_get_current(void)
 	return current;
 }
 
+static task_streams_t streams_main = {-1, -1, -1, 0};
+
+task_streams_t *task_streams(void)
+{
+	return (current >= 0 && current < (int)TASKS_MAX_COUNT) ? &tasks[current].streams : &streams_main;
+}
+
+void *task_alloc(size_t size)
+{
+	void *p = t_malloc(size);
+
+	alloc_change_owner(p, current);
+
+	return p;
+}
+
 task_t *task_create(const char *name, int (*entry)(void *arg, uint64_t system_time), void *arg)
 {
 	for (int i = 0; i < (int)TASKS_MAX_COUNT; i++) {
@@ -46,7 +153,9 @@ task_t *task_create(const char *name, int (*entry)(void *arg, uint64_t system_ti
 			tasks[i].arg = arg;
 			tasks[i].state = TASK_RUNNING;
 			tasks[i].wake_tick = now;
+			tasks[i].streams = *task_streams();
 			strncpy(tasks[i].info.name, name, TASK_NAME_SIZE - 1);
+			alloc_change_owner(arg, i);
 			return &tasks[i];
 		}
 	}
@@ -57,7 +166,7 @@ task_t *task_create(const char *name, int (*entry)(void *arg, uint64_t system_ti
 static void stop(int i)
 {
 	tasks[i].state = TASK_UNUSED;
-	free(tasks[i].arg);
+	free_owner(i);
 }
 
 static void run_tasks(uint64_t until)
@@ -94,6 +203,9 @@ static void log_add(const char *text)
 	strncat(out, text, sizeof(out) - strlen(out) - 1);
 }
 
+static int flaky_fails;
+static int flaky_lose; /* what `lose` sets flaky_fails to */
+
 int t_open(const char *path, int flags, ...)
 {
 	(void)flags;
@@ -109,10 +221,22 @@ int t_open(const char *path, int flags, ...)
 		return 7;
 	if (strcmp(path, "long") == 0)
 		return 8;
+	if (strcmp(path, "big") == 0)
+		return 9;
+	/* only in directory 5 */
+	if (strcmp(path, "here") == 0 && task_streams()->cwd == 5)
+		return 10;
+	/* opens after flaky_fails more tries (as with a full heap) */
+	if (strcmp(path, "flaky") == 0 && flaky_fails > 0) {
+		flaky_fails--;
+		return -1;
+	}
+	if (strcmp(path, "flaky") == 0)
+		return 11;
 	return -1;
 }
 
-/* a file longer than one 127-byte read: it has a size */
+/* files: they have a size, and are read a line at a time */
 static const char long_script[] =
 	"# a script longer than 127 bytes, read whole because the file has a size\n"
 	"set n 0\n"
@@ -122,11 +246,26 @@ static const char long_script[] =
 	"echo long $n\n";
 static long long_pos;
 
+/* larger than the heap of a small board: built by main() */
+static char big_script[4096];
+
+static const char here_script[] = "cd 0\necho a\n  echo b\n";
+
+static const char *file_text(int fd)
+{
+	static const char script[] = "set n 3\nwhile $n > 0\necho file $n\nset n $n - 1\nend\n";
+
+	static const char flaky[] = "echo one\nlose\necho two\n";
+
+	return (fd == 7) ? script : (fd == 8) ? long_script : (fd == 9) ? big_script : (fd == 10) ? here_script :
+	       (fd == 11) ? flaky : NULL;
+}
+
 off_t t_lseek(int fd, off_t offset, int whence)
 {
-	if (fd != 8)
+	if (file_text(fd) == NULL)
 		return -1; /* a node without a size */
-	long size = (long)strlen(long_script);
+	long size = (long)strlen(file_text(fd));
 	long_pos = (whence == SEEK_END) ? size + offset : (whence == SEEK_SET) ? offset : long_pos + offset;
 	return long_pos;
 }
@@ -148,10 +287,8 @@ ssize_t t_read(int fd, void *buf, size_t len)
 
 	if (fd == 5)
 		src = file_a;
-	if (fd == 7)
-		src = "set n 3\nwhile $n > 0\necho file $n\nset n $n - 1\nend\n";
-	if (fd == 8)
-		src = long_script + long_pos;
+	if (file_text(fd) != NULL)
+		src = file_text(fd) + long_pos;
 
 	if (src == NULL) {
 		return -1;
@@ -201,6 +338,26 @@ int t_system(const char *cmd)
 		return -1;
 	}
 
+	if (strncmp(cmd, "cd ", 3) == 0) {
+		task_streams()->cwd = (uint8_t)atoi(cmd + 3);
+		return 0;
+	}
+
+	/* the heap the scripts hold now, against the last `heap` */
+	if (strcmp(cmd, "heap") == 0) {
+		static size_t last;
+
+		snprintf(line, sizeof(line), "[heap %+d]", (int)(heap_used - last));
+		log_add(strstr(out, "[heap") == NULL ? "[heap]" : line);
+		last = heap_used;
+		return 0;
+	}
+
+	if (strcmp(cmd, "lose") == 0) {
+		flaky_fails = flaky_lose;
+		return 0;
+	}
+
 	if (strcmp(cmd, "fail") == 0) {
 		log_add("[fail]");
 		return -1;
@@ -240,6 +397,8 @@ static void reset(void)
 	out[0] = '\0';
 	file_b[0] = '\0';
 	now = 0;
+	heap_peak = heap_used;
+	streams_main.cwd = 0;
 }
 
 static void check(const char *name, const char *script, uint64_t ms, const char *expect)
@@ -247,6 +406,10 @@ static void check(const char *name, const char *script, uint64_t ms, const char 
 	reset();
 	argscript_start("t", script);
 	run_tasks(ms);
+
+	if (expect == NULL) {
+		return; /* the caller looks at out */
+	}
 
 	if (strcmp(out, expect) != 0) {
 		printf("FAIL %s\n  got    %s\n  expect %s\n", name, out, expect);
@@ -322,6 +485,7 @@ int main(void)
 
 	check("as from node", "as script", 5, "[echo file 3][echo file 2][echo file 1]");
 	check("as long file", "as long", 20, "[echo long 4]");
+	check("as needs a file", "as pot\necho $?", 20, "{not a file}[echo -1]");
 
 	/* the last command runs with the script's memory already freed */
 	check("last line frees", "echo a\nstate", 5, "[echo a][freed]");
@@ -333,10 +497,66 @@ int main(void)
 
 	check("busy loop yields", "while 1\nend", 3, "");
 
-	check("errors", "set a 1 / 0\necho never", 5, "");
-	check("error end", "end", 5, "");
-	check("error missing end", "if 0\necho a", 5, "");
-	check("error label", "goto nowhere", 5, "");
+	check("errors", "set a 1 / 0\necho never", 5, "{-as line 1: divide by zero}");
+	check("error end", "echo a\n\n  # x\nend", 5, "[echo a]{-as line 4: end without block}");
+	check("error missing end", "if 0\necho a", 5, "{-as line 2: missing end}");
+	check("error label", "set a 1\ngoto nowhere", 5, "{-as line 2: not found}");
+
+	/* variables take heap one entry at a time, and only once they exist */
+	check("variables on the heap", "heap\nset a 1\nheap\nset b 2\nset a 3\nheap\necho $a $b", 5,
+	      "[heap][heap +32][heap +32][echo 3 2]");
+	check("variables, the most", "set a 1\nset b 2\nset c 3\nset d 4\nset e 5\nset f 6\nset g 7\n"
+	      "set h 8\nset i 9\necho $a$h$i", 5, "{-as line 9: bad variable}");
+	check("run copies the variables",
+	      "set v 7\nrun child :c\nset v 1\nwait 5\necho parent $v\nexit\n:c\necho child $v", 20,
+	      "[echo child 7][echo parent 1]");
+
+	/* a file is read a line at a time: a script larger than a small board's heap */
+	{
+		char *p = big_script;
+		char *end = big_script + sizeof(big_script);
+
+		p += snprintf(p, end - p, "heap\nset n 0\n");
+		for (int i = 0; i < 50; i++) {
+			p += snprintf(p, end - p, "    # line %d of a script far longer than the heap of a small board\n", i);
+		}
+		p += snprintf(p, end - p, "repeat 3\n\tset n $n + 1\nend\n");
+		p += snprintf(p, end - p, "   echo %0120d\n", 7); /* indented, longer than a line: cut */
+		snprintf(p, end - p, "echo big $n\nend\n");
+	}
+	check("as big file", "as big", 20, NULL);
+	/* the long line is cut to 95 characters with its indentation, its rest skipped */
+	if (strncmp(out, "[heap][echo 0000", 16) != 0 || strlen(out) != 6 + 94 + 12 + 32 ||
+	    strstr(out, "0][echo big 3]{-as line 58: end without block}") == NULL) {
+		printf("FAIL as big file: %s\n", out);
+		failed++;
+	}
+	if (heap_peak > 160) {
+		printf("FAIL as big file: %u B of heap\n", (unsigned)heap_peak);
+		failed++;
+	} else {
+		printf("ok   as big file: %u B of heap for a %u B script\n", (unsigned)heap_peak,
+		       (unsigned)strlen(big_script));
+	}
+
+	/* a file that cannot be opened for a while (a full heap): the same line later; gone: an error */
+	flaky_lose = 5;
+	check("as file not opened for a while", "as flaky", 200, "[echo one][echo two]");
+	flaky_lose = 1000;
+	check("as file gone", "as flaky", 3000, "[echo one]{-as: cannot read}");
+	flaky_fails = 0;
+
+	/* the path is relative to where the script started, also after a `cd` in it */
+	reset();
+	streams_main.cwd = 5;
+	argscript_start("t", "as here");
+	run_tasks(10);
+	if (strcmp(out, "[echo a][echo b]") != 0) {
+		printf("FAIL as relative path: %s\n", out);
+		failed++;
+	} else {
+		printf("ok   as relative path\n");
+	}
 
 	/* the long run tasks left over from the last tests must not leak */
 	reset();

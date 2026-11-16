@@ -28,7 +28,8 @@ Key properties:
   gives up the CPU every few lines.
 - **Small and predictable.** There is no compiler, no parse tree and no
   garbage collector. The interpreter works directly on the source text, and
-  each running script uses one fixed block of about 300 bytes of heap.
+  each running script uses one block of about 60 bytes of heap, plus 32 bytes
+  per variable once it exists.
 
 ## Contents
 
@@ -96,11 +97,14 @@ argscript_start("selftest", selftest);    /* a new task named "selftest" */
 > kill probe                 stop it at any time
 ```
 
-`as` copies the script out of the node before it starts, so the node can be
-changed or deleted while the script runs. A file (one that `lseek()` can size,
-such as a file on a vfs mount) is read whole, up to `AS_FILE_MAX` (1023
-bytes); any other node gives what one read returns, up to 127 bytes. The copy
-is on the heap while the script runs: about 300 bytes plus the script.
+`as` runs a file: anything `lseek()` can size, such as a file on a vfs mount
+or a RAM file, under 64 KB. The script is not copied: only its path is kept,
+and each line is read from the file when it runs (the file is opened, read at
+the line and closed again), so a script of any length holds about 60 bytes of
+heap. A change to the file shows from the next line read on. A file that
+cannot be opened (opening needs a little heap) is tried again every 10 ms; after
+2 s the script ends with `-as: cannot read`. The path is taken in the
+directory where `as` ran, also after a `cd` in the script.
 
 With vfs, `vfs_interpreter_set(argscript_execute)` makes scripts commands: a
 file in `/home` runs by its name, any other by its path, as a task of its name:
@@ -437,7 +441,7 @@ Errors in the script itself stop it and print the line number:
 
 | Message              | Cause                                                       |
 |----------------------|-------------------------------------------------------------|
-| `bad variable`       | The name is invalid or too long, or all 8 variables are in use. |
+| `bad variable`       | The name is invalid or too long, all 8 variables are in use, or the heap has no room for one more. |
 | `bad argument`       | An unknown comparison operator, or `run` without `NAME :LABEL`. |
 | `divide by zero`     | `/` or `%` by 0 in `set`.                                    |
 | `too deep`           | More than 6 nested `if` / `while` / `repeat`.                |
@@ -449,8 +453,8 @@ Errors in the script itself stop it and print the line number:
 | `line too long`      | A line is longer than 95 characters after `$` expansion.        |
 | `out of memory`      | `run` could not get heap memory or a task slot.               |
 
-The `as` command prints `open failed`, `out of memory` or `bad argument` when
-it cannot start a script.
+The `as` command prints `open failed`, `not a file`, `out of memory` or
+`bad argument` when it cannot start a script.
 
 ---
 
@@ -519,7 +523,7 @@ compiler command line, or define it before the header is included.
 
 | Define                | Default | Meaning                                       |
 |-----------------------|---------|-----------------------------------------------|
-| `ARGSCRIPT_VARS`      | 8       | Variables per script.                          |
+| `ARGSCRIPT_VARS`      | 8       | Most variables per script.                     |
 | `ARGSCRIPT_NAME_SIZE` | 8       | Variable name length, including the `'\0'`.     |
 | `ARGSCRIPT_TEXT_SIZE` | 24      | Variable text length, including the `'\0'`.     |
 | `ARGSCRIPT_DEPTH`     | 6       | Deepest nesting of `if` / `while` / `repeat`.   |
@@ -535,11 +539,12 @@ The figures below are for PIC24 with XC16 at `-O0`:
 | Code                  | about 3.7 KB                                      |
 | Constant strings      | about 0.5 KB                                      |
 | Static RAM            | 192 B (two line buffers, shared by all scripts)    |
-| Heap, per script      | about 300 B (+128 B for a script started by `as`) |
+| Heap, per script      | about 60 B (+ the path for a script started by `as`), + 32 B per variable |
 
-Most of the per-script heap is the variable table
-(`ARGSCRIPT_VARS × (ARGSCRIPT_NAME_SIZE + ARGSCRIPT_TEXT_SIZE)`). Lower the
-defaults on very small parts.
+The variables take heap only once they exist: one block of
+`ARGSCRIPT_NAME_SIZE + ARGSCRIPT_TEXT_SIZE` bytes per variable, grown by one
+entry for each new one, up to `ARGSCRIPT_VARS`. A script without variables
+costs no more for them; `-DARGSCRIPT_VARS=0` leaves the code for them out.
 
 ---
 
@@ -671,12 +676,11 @@ Stop them with `kill fast` and `kill slow`.
 - **Quote values that may be empty.** Use `if "$x" == ""`, not `if $x == ""`.
 - **Variable names are at most 7 characters**, and at most 8 variables exist
   per script. Variable text is cut to 23 characters.
-- **Lines are cut at 95 characters** when read, and a line that grows longer
-  than that through `$` expansion is an error.
-- **`as` reads at most 127 bytes** from a node without a size (a RAM file),
-  and up to 1023 bytes (`AS_FILE_MAX`) from a file. Start longer scripts from
-  C with `argscript_start()`, or split them and call one from another with
-  `as`.
+- **Lines are cut at 95 characters** when read (indentation included), and a
+  line that grows longer than that through `$` expansion is an error.
+- **`as` runs files** (anything `lseek()` can size) under 64 KB. Each line is
+  read from the file when it runs, so editing the file changes a script that
+  is running from the next line on.
 - **Numbers have 7 significant digits.** Above 9 999 999, counters lose
   precision (and print as `1e+07`, for example).
 - **`goto` closes every open block.** Do not jump into a loop or an `if`.
@@ -702,9 +706,7 @@ make test                         # all LETS host tests, argscript included
 To build and run only the argscript test:
 
 ```sh
-cd argscript/test
-cc -std=c99 -Wall -include fcntl.h -Dopen=t_open -Dread=t_read -Dwrite=t_write \
-   -Dclose=t_close -Dsystem=t_system as_test.c ../argscript.c -o as_test && ./as_test
+make build/as_test && ./build/as_test
 ```
 
 When you change the interpreter, add a `check()` case to `as_test.c` that

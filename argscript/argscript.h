@@ -57,7 +57,7 @@
  */
 
 #ifndef ARGSCRIPT_VARS
-#define ARGSCRIPT_VARS 8 /**< Variables per script. */
+#define ARGSCRIPT_VARS 8 /**< Most variables per script (on the heap, 32 B each, once they exist). */
 #endif
 
 #ifndef ARGSCRIPT_NAME_SIZE
@@ -90,10 +90,13 @@
 int argscript_start(const char *name, const char *source);
 
 /**
- * @brief The `as <node> [name]` command: runs the script stored in a node.
+ * @brief The `as <file> [name]` command: runs the script in a file.
  *
- * The script (up to 127 bytes) is copied first, so the node may change while
- * it runs. The task is named @p name, or "as".
+ * The file (anything lseek() can size: a file of a mounted file system, a RAM
+ * file; under 64 KB) is not copied: only its path is kept, and each line is
+ * read from the file when it runs, so the script holds about 60 bytes of heap
+ * however long it is. A change to the file shows from the next line read on.
+ * The task is named @p name, or "as".
  *
  * @return 0, or -1 on error.
  */

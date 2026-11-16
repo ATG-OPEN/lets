@@ -47,7 +47,8 @@ build/test_sleep: tests/test_sleep.c $(KERNEL) | build
 
 build/as_test: argscript/test/as_test.c argscript/argscript.c lib/args.c | build
 	$(CC) -std=c99 $(WARN) $(SAN) -include fcntl.h -Dopen=t_open -Dread=t_read -Dwrite=t_write \
-	    -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek argscript/test/as_test.c argscript/argscript.c lib/args.c -o $@
+	    -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek -Dmalloc=t_malloc -Dfree=t_free \
+	    -Dprintf=t_printf argscript/test/as_test.c argscript/argscript.c lib/args.c -o $@
 
 LIBS    = $(filter-out lib/uuid.c opt/tty.c,$(wildcard lib/*.c) $(wildcard opt/*.c))
 

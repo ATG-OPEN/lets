@@ -11,6 +11,12 @@
  * is compiled or stored per line, which keeps the RAM use to one as_state_t
  * per running script.
  *
+ * The source is a text in memory (argscript_start(): a string in flash), or a
+ * file read a line at a time (`as`): only its path is kept, and each line is
+ * read from the file when it runs. Each kind has its own reader, so a build
+ * that never calls argscript_start() does not link the first. Variables take
+ * heap only once they exist: one block, grown by one entry per new variable.
+ *
  * Each line goes through three steps:
  *   as_fetch()   copies the line to as_raw, without indentation
  *   as_expand()  replaces $name and $? into as_line
@@ -20,6 +26,7 @@
 #include "argscript.h"
 
 #include "../kernel/task.h"
+#include "../kernel/alloc.h"
 #include "../lib/args.h"
 #include "../vfs/vfs.h"
 
@@ -32,10 +39,7 @@
 /* -------------------------------------------------------------------------- */
 
 #define AS_WAIT_MAX  30000u /* longest single task sleep in ms */
-#define AS_FILE_SIZE 128u   /* longest script read from a node without a size */
-#ifndef AS_FILE_MAX
-#define AS_FILE_MAX 1024u /* longest script read from a file (a node lseek() can size) */
-#endif
+#define AS_FILE_MAX  0xFFFFu /* a file is read where it is: offsets are 16 bits */
 
 /* kinds of block on the block stack */
 enum {
@@ -64,19 +68,27 @@ typedef struct {
 	uint8_t type;  /* AS_IF, AS_WHILE or AS_REPEAT */
 } as_block_t;
 
+typedef struct as_state as_state_t;
+
+/* up to `n` bytes of the source from offset `at`, fewer at its end */
+typedef unsigned int (*as_reader_t)(as_state_t *s, uint16_t at, char *buf, unsigned int n);
+
 /* one running script: the task's argument, freed when the script ends */
-typedef struct {
-	const char *src; /* the source: text below, or a string in flash */
+struct as_state {
+	as_reader_t read; /* as_read_text() or as_read_file() */
+	const char *src;  /* the source in memory (a string in flash) */
+	as_var_t *var;	 /* the variables: one heap block the task owns, NULL while there are none */
 	uint16_t pos;	 /* next line */
 	uint16_t line;	 /* current line, for while and errors */
 	uint32_t wait;	 /* ms left to sleep */
 	int result;	 /* $? */
 	uint8_t depth;	 /* open blocks */
+	uint8_t vars;	 /* entries in var */
+	uint8_t cwd;	 /* a file: the directory its path is relative to */
+	uint8_t stalled; /* reads in a row the file could not be opened for */
 	as_block_t block[ARGSCRIPT_DEPTH];
-	as_var_t var[ARGSCRIPT_VARS];
-	uint16_t size; /* bytes in text */
-	char text[];   /* own copy of the source, when read from a node */
-} as_state_t;
+	char path[]; /* the file */
+};
 
 /* one script line runs to the end within a task call, so all scripts share these */
 static char as_raw[ARGSCRIPT_LINE_SIZE];
@@ -156,19 +168,18 @@ static bool as_number(const char *t, float *v)
 /* the variable `name`; with `create`, a new empty one when there is none */
 static as_var_t *as_var(as_state_t *s, const char *name, bool create)
 {
-	as_var_t *empty = NULL;
+	if (ARGSCRIPT_VARS == 0) {
+		return NULL; /* built without variables */
+	}
 
-	for (int i = 0; i < ARGSCRIPT_VARS; i++) {
-		as_var_t *v = &s->var[i];
-
-		if (v->name[0] == '\0') {
-			empty = (empty == NULL) ? v : empty;
-		} else if (strcmp(v->name, name) == 0) {
-			return v;
+	for (int i = 0; i < s->vars; i++) {
+		if (strcmp(s->var[i].name, name) == 0) {
+			return &s->var[i];
 		}
 	}
 
-	if (!create || empty == NULL || name[0] == '\0' || strlen(name) >= ARGSCRIPT_NAME_SIZE) {
+	if (!create || s->vars >= ARGSCRIPT_VARS || name[0] == '\0' ||
+	    strlen(name) >= ARGSCRIPT_NAME_SIZE) {
 		return NULL;
 	}
 
@@ -178,10 +189,24 @@ static as_var_t *as_var(as_state_t *s, const char *name, bool create)
 		}
 	}
 
-	strcpy(empty->name, name);
-	empty->text[0] = '\0';
+	/* one entry more: a new block for all of them, owned by the script's task */
+	as_var_t *v = task_alloc((s->vars + 1u) * sizeof(as_var_t));
 
-	return empty;
+	if (v == NULL) {
+		return NULL;
+	}
+
+	if (s->var != NULL) {
+		memcpy(v, s->var, s->vars * sizeof(as_var_t));
+		free(s->var);
+	}
+
+	s->var = v;
+	v += s->vars++;
+	strcpy(v->name, name);
+	v->text[0] = '\0';
+
+	return v;
 }
 
 /* stores text, cut to the variable size */
@@ -199,41 +224,91 @@ static void as_var_number(as_var_t *v, float f)
 
 /* --------------------------------- source --------------------------------- */
 
-/* copy the next line to as_raw without indentation and trailing spaces */
+/* the source in memory */
+static unsigned int as_read_text(as_state_t *s, uint16_t at, char *buf, unsigned int n)
+{
+	unsigned int k = 0;
+
+	for (const char *p = s->src + at; k < n && p[k] != '\0'; k++) {
+		buf[k] = p[k];
+	}
+
+	return k;
+}
+
+/* the file: opened for each read, in the directory the script started in */
+static unsigned int as_read_file(as_state_t *s, uint16_t at, char *buf, unsigned int n)
+{
+	task_streams_t *ts = task_streams();
+	uint8_t cwd = ts->cwd;
+
+	ts->cwd = s->cwd;
+
+	int fd = open(s->path, O_RDONLY, 0);
+
+	ts->cwd = cwd;
+
+	/* gone, or no heap for the handle now: counted, as_task() tries again */
+	s->stalled = (fd < 0) ? (uint8_t)(s->stalled + 1u) : 0u;
+
+	if (fd < 0) {
+		return 0;
+	}
+
+	lseek(fd, at, SEEK_SET); /* a file: it was sized before the script started */
+
+	int r = read(fd, buf, n);
+
+	close(fd);
+
+	return (r > 0) ? (unsigned int)r : 0u;
+}
+
+/* the next line to as_raw without indentation and trailing spaces */
 static bool as_fetch(as_state_t *s)
 {
-	const char *p = s->src + s->pos;
+	uint16_t at = s->pos;
+	unsigned int n = s->read(s, at, as_raw, ARGSCRIPT_LINE_SIZE - 1);
 
-	if (*p == '\0') {
+	if (n == 0) {
 		return false;
 	}
 
-	s->line = s->pos;
+	s->line = at;
 
-	while (*p == ' ' || *p == '\t') {
-		p++;
+	unsigned int k = 0;
+
+	while (k < n && as_raw[k] != '\n') {
+		k++;
 	}
 
-	unsigned int n = 0;
+	at += k;
 
-	while (*p != '\0' && *p != '\n') {
-		if (n < ARGSCRIPT_LINE_SIZE - 1) {
-			as_raw[n++] = *p;
+	if (k < n) {
+		at++; /* the '\n' */
+	} else if (n == ARGSCRIPT_LINE_SIZE - 1) {
+		/* longer than as_raw: the rest of it is skipped */
+		char c = 0;
+
+		while (c != '\n' && s->read(s, at, &c, 1) == 1) {
+			at++;
 		}
-
-		p++;
 	}
 
-	if (*p == '\n') {
-		p++;
+	while (k > 0 && (as_raw[k - 1] == '\r' || as_raw[k - 1] == ' ' || as_raw[k - 1] == '\t')) {
+		k--;
 	}
 
-	while (n > 0 && (as_raw[n - 1] == '\r' || as_raw[n - 1] == ' ' || as_raw[n - 1] == '\t')) {
-		n--;
+	as_raw[k] = '\0';
+
+	unsigned int b = 0;
+
+	while (as_raw[b] == ' ' || as_raw[b] == '\t') {
+		b++;
 	}
 
-	as_raw[n] = '\0';
-	s->pos = (uint16_t)(p - s->src);
+	memmove(as_raw, as_raw + b, k - b + 1);
+	s->pos = at;
 
 	return true;
 }
@@ -325,10 +400,11 @@ static int as_label(as_state_t *s, const char *name)
 /* prints the line number and the message; returns -1 (stops the script) */
 static int as_error(as_state_t *s, const char *msg)
 {
+	uint16_t at = s->line;
 	unsigned int line = 1;
 
-	for (uint16_t i = 0; i < s->line; i++) {
-		line += (s->src[i] == '\n');
+	/* the lines before it, read again from the start (the script stops here) */
+	for (s->pos = 0; s->pos < at && as_fetch(s); line++) {
 	}
 
 	printf("-as line %u: %s\n", line, msg);
@@ -359,18 +435,15 @@ static int as_cond(char *p)
 		c = strcmp(a, b);
 	}
 
-	if (strcmp(op, "==") == 0)
-		return c == 0;
-	if (strcmp(op, "!=") == 0)
-		return c != 0;
-	if (strcmp(op, "<") == 0)
-		return c < 0;
-	if (strcmp(op, ">") == 0)
-		return c > 0;
-	if (strcmp(op, "<=") == 0)
-		return c <= 0;
-	if (strcmp(op, ">=") == 0)
-		return c >= 0;
+	/* the operators, and the outcomes each is true for: bit 0 less, bit 1 equal, bit 2 greater */
+	static const char ops[][3] = {"==", "!=", "<", ">", "<=", ">="};
+	static const uint8_t when[] = {2u, 5u, 1u, 4u, 3u, 6u};
+
+	for (unsigned int i = 0; i < sizeof(when); i++) {
+		if (strcmp(op, ops[i]) == 0) {
+			return (when[i] >> ((c > 0) - (c < 0) + 1)) & 1u;
+		}
+	}
 
 	return -1;
 }
@@ -575,30 +648,44 @@ static int as_run(as_state_t *s, char *p)
 		return as_error(s, "bad argument");
 	}
 
-	as_state_t *c = malloc(sizeof(as_state_t) + s->size);
+	size_t size = sizeof(as_state_t) + ((s->src == NULL) ? strlen(s->path) + 1u : 0u);
+	as_state_t *c = malloc(size);
 
 	if (c == NULL) {
 		return as_error(s, "out of memory");
 	}
 
-	memcpy(c, s, sizeof(as_state_t) + s->size);
-
-	if (s->size > 0) {
-		c->src = c->text;
-	}
-
+	memcpy(c, s, size);
 	c->wait = 0;
+	c->var = NULL;
 
-	if (as_label(c, label + 1) < 0) {
-		free(c);
-		return as_error(s, "not found");
+	if (ARGSCRIPT_VARS > 0 && s->vars > 0) {
+		c->var = malloc(s->vars * sizeof(as_var_t));
+
+		if (c->var != NULL) {
+			memcpy(c->var, s->var, s->vars * sizeof(as_var_t));
+		}
 	}
 
-	if (task_create(name, as_task, c) == NULL) {
-		free(c);
-		return as_error(s, "out of memory");
+	const char *error = "out of memory";
+	task_t *t = NULL;
+
+	if (ARGSCRIPT_VARS > 0 && s->vars > 0 && c->var == NULL) {
+		/* no room for the variables */
+	} else if (as_label(c, label + 1) < 0) {
+		error = "not found";
+	} else {
+		t = task_create(name, as_task, c);
 	}
 
+	if (t == NULL) {
+		free(c->var);
+		free(c);
+		return as_error(s, error);
+	}
+
+	/* the copy of the variables is the new task's, as its state is */
+	alloc_change_owner(c->var, (int)(t - task_get_data()));
 	s->result = 0;
 
 	return 0;
@@ -630,24 +717,20 @@ enum {
 };
 
 /* true when only empty lines, comments and labels follow the line just fetched */
-static bool as_last(const as_state_t *s)
+static bool as_last(as_state_t *s)
 {
-	const char *p = s->src + s->pos;
+	uint16_t pos = s->pos;
+	uint16_t line = s->line;
+	bool last = true;
 
-	while (*p != '\0') {
-		while (*p == ' ' || *p == '\t' || *p == '\r') {
-			p++;
-		}
-
-		if (*p != '\n' && *p != '\0' && *p != '#' && *p != ':') {
-			return false;
-		}
-
-		p += strcspn(p, "\n");
-		p += (*p == '\n');
+	while (last && as_fetch(s)) {
+		last = (as_raw[0] == '\0' || as_raw[0] == '#' || as_raw[0] == ':');
 	}
 
-	return true;
+	s->pos = pos;
+	s->line = line;
+
+	return last && s->stalled == 0; /* a file not read now: more may follow */
 }
 
 /* one line from as_raw, < 0 stops the script */
@@ -681,6 +764,7 @@ static int as_step(as_state_t *s)
 				t[i].arg = NULL; /* the task no longer owns it */
 			}
 
+			free(s->var);
 			free(s);
 			system(as_line); /* as_line is not in the state */
 
@@ -804,7 +888,20 @@ static int as_task(void *args, uint64_t system_time)
 	}
 
 	for (int i = 0; i < ARGSCRIPT_STEPS; i++) {
-		if (!as_fetch(s) || as_step(s) < 0) {
+		/* a file that cannot be opened now (a full heap): the same line again later, for 2 s */
+		if (!as_fetch(s)) {
+			if (s->stalled > 0 && s->stalled < 200u) {
+				return 10;
+			}
+
+			if (s->stalled > 0) {
+				printf("-as: cannot read\n");
+			}
+
+			return -1;
+		}
+
+		if (as_step(s) < 0) {
 			return -1;
 		}
 
@@ -816,15 +913,25 @@ static int as_task(void *args, uint64_t system_time)
 	return 0;
 }
 
-/* a new state with room for `size` bytes of source text */
-static as_state_t *as_new(uint16_t size)
+/* a new script task: `src` a text in memory, or NULL and `path` the file */
+static as_state_t *as_new(const char *name, as_reader_t read, const char *src, const char *path)
 {
+	size_t size = (src == NULL) ? strlen(path) + 1u : 0u;
 	as_state_t *s = malloc(sizeof(as_state_t) + size);
 
-	if (s != NULL) {
-		memset(s, 0, sizeof(as_state_t));
-		s->size = size;
-		s->src = s->text;
+	if (s == NULL) {
+		return NULL;
+	}
+
+	memset(s, 0, sizeof(as_state_t));
+	s->read = read;
+	s->src = src;
+	s->cwd = task_streams()->cwd;
+	memcpy(s->path, path, size);
+
+	if (task_create(name, as_task, s) == NULL) {
+		free(s);
+		return NULL;
 	}
 
 	return s;
@@ -838,20 +945,7 @@ int argscript_start(const char *name, const char *source)
 		return -1;
 	}
 
-	as_state_t *s = as_new(0);
-
-	if (s == NULL) {
-		return -1;
-	}
-
-	s->src = source;
-
-	if (task_create(name, as_task, s) == NULL) {
-		free(s);
-		return -1;
-	}
-
-	return 0;
+	return (as_new(name, as_read_text, source, NULL) == NULL) ? -1 : 0;
 }
 
 int argscript_execute(void *args, int argc, char *argv[])
@@ -862,7 +956,7 @@ int argscript_execute(void *args, int argc, char *argv[])
 	}
 
 	if (strcmp(argv[1], "-help") == 0) {
-		printf("as NODE [NAME]   run the script stored in NODE\n");
+		printf("as FILE [NAME]   run the script in FILE\n");
 		return 0;
 	}
 
@@ -873,35 +967,21 @@ int argscript_execute(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-	/* a file has a size: read all of it; another node: what one read gives */
+	/* a file (one lseek() can size): it is read a line at a time while the script runs */
 	long end = (long)lseek(fd, 0, SEEK_END);
-	unsigned int size = AS_FILE_SIZE;
 
-	if (end >= (long)AS_FILE_MAX) {
-		close(fd);
-		printf("too long\n");
-		return -1;
-	}
-
-	if (end > 0 && lseek(fd, 0, SEEK_SET) == 0) {
-		size = (unsigned int)end + 1u;
-	}
-
-	as_state_t *s = as_new((uint16_t)size);
-
-	if (s == NULL) {
-		close(fd);
-		printf("out of memory\n");
-		return -1;
-	}
-
-	int n = read(fd, s->text, size - 1u);
 	close(fd);
 
-	s->text[(n < 0) ? 0 : n] = '\0';
+	/*
+	 * Not a file, or one of 64 KB or more (lines are found by 16-bit offsets). One constant
+	 * text: XC16 makes it puts(), far less stack than printf() (two would become one printf).
+	 */
+	if ((unsigned long)end >= AS_FILE_MAX) {
+		printf("not a file\n");
+		return -1;
+	}
 
-	if (task_create((argc == 3) ? argv[2] : "as", as_task, s) == NULL) {
-		free(s);
+	if (as_new((argc == 3) ? argv[2] : "as", as_read_file, NULL, argv[1]) == NULL) {
 		printf("out of memory\n");
 		return -1;
 	}
