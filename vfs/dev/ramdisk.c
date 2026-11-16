@@ -39,6 +39,7 @@ int ramdisk_init(ramdisk_t *disk, uint8_t *mem, uint32_t size)
 	disk->blk.discard = NULL;
 	disk->blk.size = size;
 	disk->blk.pos = 0;
+	disk->blk.sync = NULL;
 	disk->mem = mem;
 
 	return 0;

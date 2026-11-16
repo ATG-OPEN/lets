@@ -46,8 +46,8 @@ which is line buffered (128 bytes).
 ## XC16
 
 The kernel's `open`, `read`, `write`, `close`, `lseek`, `system`, `malloc` and `free` are placed
-in `.libc.*` sections, so XC16 links them instead of its own library versions. `reboot` uses
-the `reset` instruction.
+in `.libc.*` sections, so XC16 links them instead of its own library versions. `reboot`
+(`bin/reboot.c`) uses the `reset` instruction.
 
 ## A PC (host build)
 

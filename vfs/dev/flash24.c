@@ -231,6 +231,7 @@ int flash24_init(flash24_t *f, uint32_t address)
 	f->blk.discard = NULL;
 	f->blk.size = FLASH24_HEADER;
 	f->blk.pos = 0;
+	f->blk.sync = NULL;
 	f->base = address;
 	f->live = 0;
 	f->gen = 0;

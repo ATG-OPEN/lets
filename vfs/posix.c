@@ -4,8 +4,8 @@
 /*
  * The C library's file and process calls on the node table: open() resolves
  * bare node names and paths and opens files of mounted file systems, stdout
- * is line buffered, and system() runs commands by name or path (`reboot` is
- * built in) and takes `<`, `>` and `>>` off their command lines.
+ * is line buffered, and system() runs commands by name or path and takes
+ * `<`, `>` and `>>` off their command lines.
  *
  * Handles 0, 1 and 2 go through the running task's streams (kernel/task.h), so
  * every task can have its own; one that has none follows the console.
@@ -385,15 +385,6 @@ static int posix_run(void)
 		return -1;
 	}
 
-	if (strcmp(argv[0], "reboot") == 0 && argc == 1) {
-#if defined(__XC16__)
-		__asm__ volatile("reset");
-#else
-		exit(0); /* host build: the process ends */
-#endif
-		return 1;
-	}
-
 	bool found;
 	const vfs_command_t *builtin;
 	vfs_node_t *e = posix_command(argv[0], &found, &builtin);
@@ -413,7 +404,7 @@ static int posix_run(void)
  * Runs a command line: the first word names a command (`ls`, `/opt/trgmon`),
  * whose handler gets the words as argc / argv. A script (a file at a path,
  * or by its name in VFS_HOME) goes to the interpreter set with
- * vfs_interpreter_set(), as a task of its name. `reboot` is built in. With
+ * vfs_interpreter_set(), as a task of its name. With
  * `<`, `>` or `>>` the command, and the tasks it starts, run on those streams
  * (see posix_redirect()). Returns the command's result, or -1 when there is no
  * such command.

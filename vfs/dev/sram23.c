@@ -77,6 +77,7 @@ int sram23_init(sram23_t *ram, const vfs_spi_t *spi, uint32_t size)
 	ram->blk.discard = NULL;
 	ram->blk.size = size;
 	ram->blk.pos = 0;
+	ram->blk.sync = NULL;
 	ram->spi = spi;
 
 	spi->select(true);

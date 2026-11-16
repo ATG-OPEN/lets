@@ -71,6 +71,13 @@ void nrf52_flash_sync(nrf52_flash_t *f)
 	f->dirty = false;
 }
 
+/* vfs_sync(): `sync`, `reboot` */
+static int flash_sync(vfs_blk_t *blk)
+{
+	nrf52_flash_sync((nrf52_flash_t *)blk);
+	return 0;
+}
+
 static int flash_read(vfs_blk_t *blk, uint32_t addr, void *buffer, unsigned int length)
 {
 	nrf52_flash_t *f = (nrf52_flash_t *)blk;
@@ -137,6 +144,7 @@ int nrf52_flash_init(nrf52_flash_t *f, uint32_t base)
 	f->blk.read = flash_read;
 	f->blk.write = flash_write;
 	f->blk.discard = NULL;
+	f->blk.sync = flash_sync;
 	f->blk.size = NRF52_FLASH_DATA;
 	f->blk.pos = 0;
 

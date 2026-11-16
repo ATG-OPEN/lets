@@ -97,7 +97,7 @@ Each difference is marked:
 | `grep`, `head`, `tail`, `wc` | None | add |
 | `tail -f` | None | add |
 | `test`, `[`, `true`, `false` | `if` in argscript | keep |
-| `reboot` | Built into `system()`, not a command, so `ls /bin` doesn't show it | keep |
+| `reboot`, `sync` | The same: `reboot` syncs first and lets the ttys drain | keep |
 | Terminals have `stty` | `std -t` or `shell -t` | keep |
 
 `std` has no Linux equivalent. It is the console: where a task with no streams of its own reads and

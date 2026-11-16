@@ -349,6 +349,13 @@ int vfs_file_info(const vfs_path_t *p, vfs_info_t *info);
 /** @brief Returns the block device at @p path (`ee0` or `/dev/ee0`), or NULL. */
 vfs_blk_t *vfs_blk_get(const char *path);
 
+/**
+ * @brief Passes on what stdout holds and makes every block device write what it holds
+ * back (vfs_blk_t sync()): the `sync` command, and `reboot` before the reset.
+ * @return 0, or -1 when a device failed.
+ */
+int vfs_sync(void);
+
 /** @brief The name block device @p blk is registered under, or "?". */
 const char *vfs_blk_name(const vfs_blk_t *blk);
 

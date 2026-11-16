@@ -329,6 +329,7 @@ int sst25_init(sst25_t *sf, const vfs_spi_t *spi, uint32_t size, vfs_blk_t *scra
 	sf->blk.discard = sst25_discard;
 	sf->blk.size = size;
 	sf->blk.pos = 0;
+	sf->blk.sync = NULL;
 	sf->spi = spi;
 	sf->scratch = scratch;
 	sf->erases = 0;

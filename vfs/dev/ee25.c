@@ -119,6 +119,7 @@ int ee25_init(ee25_t *ee, const vfs_spi_t *spi, uint32_t size, uint16_t page)
 	ee->blk.discard = NULL;
 	ee->blk.size = size;
 	ee->blk.pos = 0;
+	ee->blk.sync = NULL;
 	ee->spi = spi;
 	ee->page = page;
 

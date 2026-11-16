@@ -14,6 +14,10 @@
  * discard(): the file system calls it on a block it is about to fill, so the
  * driver can erase that block once instead of erasing at every small write.
  *
+ * A driver that holds writes back (a flash page kept in RAM and written a
+ * moment after the last change) fills in sync(): vfs_sync() calls it before
+ * a reset (`sync`, `reboot`).
+ *
  * vfs_blk_register() makes a device a node in /dev (`/dev/ee0`), where it can
  * be read raw (`cat -x /dev/ee0`), formatted (`mkfs ee0`) and mounted
  * (`mount ee0 /mnt/ee`).
@@ -36,6 +40,8 @@ struct vfs_blk {
 	int (*discard)(vfs_blk_t *blk, uint32_t addr, uint32_t length);
 	uint32_t size; /**< Capacity in bytes. */
 	uint32_t pos;  /**< Position of raw reads / writes through its /dev node. */
+	/** Optional (NULL): writes what it holds back now; returns 0 or -1. */
+	int (*sync)(vfs_blk_t *blk);
 };
 
 #endif /* VFS_BLK_H */

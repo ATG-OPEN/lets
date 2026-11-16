@@ -734,6 +734,24 @@ int vfs_blk_register(const char *name, vfs_blk_t *blk)
 	return (vfs_node_new(name, false, blk, &vfs_blk_handlers) < 0) ? -1 : 0;
 }
 
+int vfs_sync(void)
+{
+	int r = 0;
+
+	vfs_stdout_flush();
+
+	for (int i = 0; i < VFS_NODES_MAX; i++) {
+		vfs_blk_t *b = vfs_at(i)->args;
+
+		if (vfs_used(i) && vfs_at(i)->handlers == &vfs_blk_handlers && b->sync != NULL &&
+		    b->sync(b) < 0) {
+			r = -1;
+		}
+	}
+
+	return r;
+}
+
 const char *vfs_blk_name(const vfs_blk_t *blk)
 {
 	for (int i = 0; i < VFS_NODES_MAX; i++) {

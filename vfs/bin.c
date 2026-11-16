@@ -9,6 +9,7 @@
 #include "../bin/shell.h"
 #include "../bin/date.h"
 #include "../bin/kill.h"
+#include "../bin/reboot.h"
 #include "../bin/tmp.h"
 #include "../bin/top.h"
 #include "../bin/lines.h"
@@ -244,6 +245,12 @@ static int bin_pwd(void *args, int argc, char *argv[])
 	printf("%s\n", path);
 
 	return 0;
+}
+
+/* what the block devices hold back to the memory now */
+static int bin_sync(void *args, int argc, char *argv[])
+{
+	return vfs_sync();
 }
 
 static int bin_mkdir(void *args, int argc, char *argv[])
@@ -717,7 +724,8 @@ const vfs_command_t vfs_commands[] = {
 	{"kill", kill},		{"ls", bin_ls},
 	{"mkdir", bin_mkdir},	{"mount", bin_mount},
 	{"mv", bin_mv},		{"pwd", bin_pwd},
-	{"rm", bin_rm},		{"std", vfs_std_execute},
+	{"reboot", reboot_execute},	{"rm", bin_rm},
+	{"std", vfs_std_execute}, {"sync", bin_sync},
 	{"top", top},		{"touch", bin_touch},
 	{"umount", bin_umount}, {"uptime", date_uptime_execute},
 #ifndef VFS_NO_REDIRECT

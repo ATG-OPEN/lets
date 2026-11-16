@@ -38,6 +38,13 @@ static int part_discard(vfs_blk_t *blk, uint32_t addr, uint32_t length)
 	return p->parent->discard(p->parent, p->offset + addr, length);
 }
 
+static int part_sync(vfs_blk_t *blk)
+{
+	part_t *p = (part_t *)blk;
+
+	return p->parent->sync(p->parent);
+}
+
 int part_init(part_t *part, vfs_blk_t *parent, uint32_t offset, uint32_t size)
 {
 	if (part == NULL || parent == NULL || size == 0 || offset + size > parent->size) {
@@ -47,6 +54,7 @@ int part_init(part_t *part, vfs_blk_t *parent, uint32_t offset, uint32_t size)
 	part->blk.read = part_read;
 	part->blk.write = part_write;
 	part->blk.discard = parent->discard ? part_discard : NULL;
+	part->blk.sync = parent->sync ? part_sync : NULL;
 	part->blk.size = size;
 	part->blk.pos = 0;
 	part->parent = parent;

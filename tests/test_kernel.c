@@ -9,6 +9,7 @@
 #include "../kernel/alloc.h"
 #include "../bin/shell.h"
 #include "../bin/kill.h"
+#include "../bin/reboot.h"
 #include "../bin/tmp.h"
 #include "../bin/top.h"
 #include "../vfs/vfs.h"
@@ -140,6 +141,25 @@ static void file_is(const char *path, const char *text)
 	read(fd, got, sizeof(got) - 1);
 	close(fd);
 	CHECK(strcmp(got, text) == 0);
+}
+
+/* -------------------------------------------------------------------------- */
+/* a block device that holds its writes back, as a flash page kept in RAM; and the reset */
+
+static int syncs;
+static uint64_t reset_at, typed_at;
+
+static int held_sync(vfs_blk_t *blk)
+{
+	syncs++;
+	return 0;
+}
+
+static vfs_blk_t held = {.size = 64, .sync = held_sync};
+
+void reboot_reset(void)
+{
+	reset_at = now_us();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -596,6 +616,28 @@ static int checks(void *args, uint64_t t)
 		size_t end = strlen(sink) - strlen(prompt);
 		CHECK(strcmp(sink + end, prompt) == 0 && sink[end - 2] == '\r' && sink[end - 1] == '\n');
 		CHECK(system("kill shell") == 0);
+
+		/* sync: every block device writes what it holds back; reboot syncs, lets the ttys
+		 * drain, syncs again and resets */
+		CHECK(vfs_blk_register("held0", &held) == 0);
+		CHECK(system("sync") == 0 && syncs == 1);
+		sink_len = 0;
+		sink[0] = '\0';
+		CHECK(system("std sink") == 0);
+		CHECK(write(1, "unfinished", 10) == 10 && sink_len == 0);
+		typed_at = now_us();
+		CHECK(system("reboot") == 0);
+		CHECK(syncs == 2 && reset_at == 0);
+		CHECK(strcmp(sink, "unfinished") == 0); /* stdout was passed on */
+		step = 12;
+		return 1;
+	}
+	if (step == 12) {
+		if (reset_at == 0 && now_us() - typed_at < 4 * REBOOT_WAIT_MS * 1000u) {
+			return 1;
+		}
+
+		CHECK(reset_at != 0 && reset_at - typed_at >= REBOOT_WAIT_MS * 1000u && syncs == 3);
 
 		fprintf(stderr, "kernel: %s\n", failures ? "FAILED" : "ok");
 		exit(failures != 0);
