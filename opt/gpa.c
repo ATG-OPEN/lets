@@ -49,8 +49,16 @@ int gpa_write(void *args, void *buffer, unsigned int length)
 	if (m->channel < 0 || m->write == NULL)
 		return -1;
 
-	float *data = buffer;
-	int value = (int)((*data - m->write_offset) * m->write_k);
+	/* fewer bytes than a float (`echo 1 > led1`: text) are refused; memcpy: the buffer may be
+	 * at an odd address, which traps on a PIC24 */
+	float data;
+
+	if (length < sizeof(data))
+		return -1;
+
+	memcpy(&data, buffer, sizeof(data));
+
+	int value = (int)((data - m->write_offset) * m->write_k);
 
 	if (m->write(m->channel, value) < 0)
 		return -1;
@@ -72,9 +80,9 @@ int gpa_read(void *args, void *buffer, unsigned int length)
 		return -1;
 
 	int value = m->read(m->channel);
-	float *data = buffer;
+	float data = ((float)value - m->read_offset) * m->read_k;
 
-	*data = ((float)value - m->read_offset) * m->read_k;
+	memcpy(buffer, &data, sizeof(data)); /* the buffer may be at an odd address */
 
 	return sizeof(float);
 }

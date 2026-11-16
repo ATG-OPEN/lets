@@ -60,7 +60,8 @@ int gpa_register_node(char *name, void *args);
 
 /**
  * @brief Writes one float from @p buffer, scaled, to the point.
- * @return @p length, or -1 on an error or a point without write.
+ * @return @p length (0 for 0 bytes), or -1 on an error, a point without write, or fewer
+ * bytes than a float.
  */
 int gpa_write(void *args, void *buffer, unsigned int length);
 
