@@ -36,7 +36,7 @@ int args_parse(char *input, char *argv[], int max_args);
  * @param input      The text.
  * @param path       Receives the numbers.
  * @param max_length Size of @p path.
- * @return The number of values, or -1 when a value is outside 0..255.
+ * @return The number of values, or -1 when a value is outside 0..255 or not a number.
  */
 int args_parse_path(char *input, uint8_t *path, int max_length);
 

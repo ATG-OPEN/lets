@@ -875,6 +875,16 @@ static void test_tree(void)
 	CHECK(vfs_rename("/opt/d1/d2", "/opt/d3") == 0 && vfs_rename("/opt/d1", "/opt/d1/x") == -1);
 	CHECK(vfs_remove("/opt/d1") == 0 && vfs_remove("/opt/d3") == 0);
 
+	/* dotted paths: a part that is no number, or too big for a byte, is an error */
+	{
+		uint8_t path[8];
+
+		CHECK(args_parse_path((char[]){"1.1.2.250"}, path, 8) == 4 && path[3] == 250);
+		CHECK(args_parse_path((char[]){"1.x.3"}, path, 8) == -1);
+		CHECK(args_parse_path((char[]){"65537"}, path, 8) == -1);
+		CHECK(args_parse_path((char[]){"1 2"}, path, 1) == 1 && path[0] == 1);
+	}
+
 	/* numbers without strtod */
 	{
 		char *end;

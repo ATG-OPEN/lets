@@ -67,11 +67,15 @@ int args_parse_path(char *input, uint8_t *path, int max_length)
 			break;
 		}
 
-		int value = strtol(p, &p, 10);
+		/* a long: 65537 is not 1 on a 16-bit int; no digits ("1.x") is no 0 */
+		char *end;
+		long value = strtol(p, &end, 10);
 
-		if (value < 0 || value > 255) {
+		if (end == p || value < 0 || value > 255) {
 			return -1;
 		}
+
+		p = end;
 
 		path[count++] = (uint8_t)value;
 	}
