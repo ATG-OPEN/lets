@@ -281,13 +281,17 @@ static int checks(void *args, uint64_t t)
 
 		/* nodes: open by name, write, read */
 		CHECK(vfs_node_create("sink", false, "pong", &sink_node) >= 0);
+		vfs_path_t node;
+		CHECK(vfs_resolve("sink", &node) == 0 && node.kind == VFS_NODE);
+		void *device = vfs_nodes_get()[node.node].args;
+		CHECK(!vfs_device_open(device));
 		int fd = open("sink", O_RDWR, 0);
-		CHECK(fd > 2);
+		CHECK(fd > 2 && vfs_device_open(device)); /* a port's tty is not written behind it */
 		CHECK(write(fd, "ping", 4) == 4);
 		CHECK(strcmp(sink, "ping") == 0);
 		char buf[8] = {0};
 		CHECK(read(fd, buf, sizeof(buf) - 1) == 4 && strcmp(buf, "pong") == 0);
-		CHECK(close(fd) == 0);
+		CHECK(close(fd) == 0 && !vfs_device_open(device));
 		CHECK(open("nothing", 0, 0) < 0);
 
 		/* commands: system() parses the line and dispatches */

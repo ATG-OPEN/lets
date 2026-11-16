@@ -842,6 +842,17 @@ static bool vfs_node_busy(int node)
 	return false;
 }
 
+bool vfs_device_open(const void *args)
+{
+	for (int i = 0; i < VFS_NODES_MAX; i++) {
+		if (vfs_used(i) && vfs_at(i)->args == args && vfs_node_busy(i)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool vfs_file_is(int handle)
 {
 	vfs_fd_t *f = vfs_fd(handle);

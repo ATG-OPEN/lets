@@ -462,7 +462,9 @@ int k_printf(const char *format, ...)
 	va_end(list);
 
 	if (vfs_stream(1) >= 0 && n > 0) {
-		return write(1, text, (unsigned int)((n < (int)sizeof(text)) ? n : (int)sizeof(text) - 1));
+		unsigned int size = (n < (int)sizeof(text)) ? (unsigned int)n : sizeof(text) - 1u;
+
+		return (write(1, text, size) < 0) ? -1 : n;
 	}
 
 	return fputs(text, stdout) < 0 ? -1 : n;

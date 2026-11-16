@@ -408,6 +408,12 @@ int vfs_fd_close(int handle);
  */
 int vfs_file_abort(int handle);
 
+/**
+ * @brief true when a handle is open on the node whose args is @p args (a driver's own
+ * struct): a port asks before it writes to a tty behind the kernel's back.
+ */
+bool vfs_device_open(const void *args);
+
 /** @brief true when @p handle is an open file of a file system (not a node). */
 bool vfs_file_is(int handle);
 
