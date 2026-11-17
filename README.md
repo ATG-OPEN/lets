@@ -9,7 +9,8 @@ board can be configured, tested and driven over a serial line without reflashing
   build is the reference: a change that does not fit there does not go in.
 - **Cooperative tasks**: 16 run-to-completion tasks (`-DTASKS_MAX_COUNT`); a task returns how
   long to sleep (ms). No stacks per task, no locks, nothing blocks. The scheduler feeds the
-  watchdog, so a task that never returns resets the board.
+  watchdog, so a task that never returns resets the board; with `-DLETS_WDT=1` it also stops
+  feeding it when a watched task misses its deadline, and a trap restarts the board too.
 - **Everything is a node in a tree**: a UART, an ADC channel, a file or a command is a node of
   the virtual file system (vfs): devices in `/dev`, commands in `/bin`, project apps in
   `/opt`; `ls -l /dev` lists them, `std ttyS1` sends stdout there, and
@@ -58,7 +59,8 @@ heap 104 of 16384 B used (0%)
 
 The demo's shell asks for the password first: the built-in default, `123456`.
 
-`top mem` shows the heap, the most stack ever used, and why the chip last reset (RCON).
+`top mem` shows the heap, the most stack ever used, and why the chip last reset (RCON); the
+first line of `top` shows the reset too, e.g. `reset watchdog (late: link)` or `reset trap 2 (in: shell)`.
 
 `build/lets-demo` is built with `VFS_NO_TFS`, as a small MCU; `./build/lets-vfs-demo` is the
 same with file systems: try `ls /`, `ls -l /dev`, `cd /mnt/ee`, `echo hi > f`, `cat f`, `df`.

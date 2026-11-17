@@ -74,19 +74,39 @@ write the board's device nodes.
 
 ## Watchdog
 
-The scheduler clears the watchdog on every loop; on its own that does nothing. To use it, set the
-fuses so that software can turn it on, with a period longer than the slowest command (an erase of
-a whole flash, say), and start it just before `tasks_start()`:
+Without `LETS_WDT` the scheduler clears a PIC24's watchdog on every loop; on its own that does
+nothing. With `-DLETS_WDT=1` the scheduler runs it (see `docs/kernel.md`) through three hooks:
+
+| hook                          | PIC24 / dsPIC33 (in `task.c`, weak)   | EFR32 (`port/efr32`)          |
+|-------------------------------|---------------------------------------|-------------------------------|
+| `port_wdt_start(ms)`          | `RCONbits.SWDTEN = 1`; `ms` unused     | WDOG0 on the 1 kHz ULFRCO     |
+| `port_wdt_kick()`             | `clrwdt`                              | `WDOG0->CMD = CLEAR`          |
+| `port_wdt_reset_cause()`      | RCON                                  | EMU RSTCAUSE                  |
+
+A PIC24F (e.g. PIC24FJ1024GA606) sets the period in its config bits and lets software turn the
+watchdog on; `FWDTEN = OFF` also locks `SWDTEN` out:
 
 ```c
-#pragma config FWDTEN = ON_SWDTEN       // the names differ between families
-#pragma config WDTPS = PS1024           // about 4 s with FWPSA = PR128
-
-RCONbits.SWDTEN = 1;
-tasks_start();
+#pragma config FWDTEN = ON_SWDTEN   // on when the kernel says (SWDTEN), off until then
+#pragma config WINDIS = OFF         // not windowed: the kernel kicks whenever a loop ends
+#pragma config WDTCMX = LPRC        // always the 31 kHz LPRC, whatever the system clock
+#pragma config FWPSA = PR128        // 4.1 ms a count ...
+#pragma config WDTPS = PS512        // ... x 512: about 2.1 s (PS1024: 4.2 s)
 ```
 
-After it fires, `top mem` shows bit 4 of RCON in `reset`.
+The period must be longer than the slowest call of any task (a flash erase, say). Other
+families name the bits differently: see the device's config-bit list in the XC16 docs.
+
+Traps: MCC's `traps.c` ends every trap in `TRAPS_halt_on_error(code)`, a weak function. With
+`LETS_WDT` the kernel defines it: it records the trap and the running task and executes `reset`,
+so the board comes back and `top` shows `reset trap 2 (in: shell)` (MCC's codes: 0 oscillator,
+1 stack, 2 address, 3 math). A project with its own trap handlers calls `task_trap(code)` from
+them, and sets `-DLETS_WDT_NO_TRAPS` if it defines `TRAPS_halt_on_error()` itself. The record
+lives in a `persistent` variable (XC16), in `.noinit` on Cortex-M (the EFR32 linker script has
+it).
+
+Another port defines the three hooks; without them (a PC) there is no watchdog and the reason is
+`-`. `port_wdt_reset_cause()` is used without `LETS_WDT` too.
 
 ## Limits
 

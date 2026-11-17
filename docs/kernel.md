@@ -56,6 +56,40 @@ prompt and reads no input until that task ends, and Ctrl-C stops it.
 
 Tasks never block or busy-wait; keep each call short.
 
+## Watchdog
+
+Built with `-DLETS_WDT=1` (off by default), the scheduler starts the hardware watchdog in
+`tasks_start()` and kicks it once per loop, but only while every *watched* task has checked in
+within its deadline:
+
+```c
+task_watch(task_create("link", link_task, NULL), 500); /* or task_watch(NULL, 500) from the task */
+
+static int link_task(void *args, uint64_t now)
+{
+        if (link_made_progress()) {
+                task_alive();          /* checked in: good for another 500 ms */
+        }
+        return 10;
+}
+```
+
+Tasks are not watched unless they ask, so idle, sleeping and slow tasks never hold the kicks
+back; `task_watch(t, 0)` lets a task go again. The deadline counts the task's sleep too: make it
+longer than its longest sleep. A task that never returns stops every kick, watched or not.
+
+Once a watched task is late the kicks stop for good and the watchdog resets the chip
+(`LETS_WDT_MS`, 2000 by default; a PIC24 takes its period from its config bits). Before that the
+kernel writes what happened to RAM that start-up does not clear; a trap does the same through
+`task_trap(code)`. After the reset `task_reset_reason()` says why (power-on, brown-out, MCLR pin,
+software, watchdog, trap), `task_fault()` which task, and `top` shows both: `reset watchdog
+(late: link)`, `reset trap 2 (in: shell)`. `top mem` lists the watched tasks and how long ago
+each checked in.
+
+The cost: 6 bytes of RAM per task slot plus 44 bytes, a loop over the task table per pass. The
+ports provide `port_wdt_start(ms)`, `port_wdt_kick()` and `port_wdt_reset_cause()` (see
+`docs/porting.md`).
+
 ## Memory
 
 - `malloc` / `free` use a fixed heap with 32 blocks (`-DMAX_BLOCK_COUNT=n`) and 2-byte alignment

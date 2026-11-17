@@ -7,6 +7,7 @@
 #include "efr32.h"
 
 #include "../../vfs/vfs.h"
+#include "../../kernel/task.h"
 
 #include <em_device.h>
 #include <stdio.h>
@@ -168,6 +169,53 @@ uint32_t efr32_reset_reason(void)
 {
 	return reset_reason;
 }
+
+/* ---- watchdog: the scheduler's (LETS_WDT), see task.h ---------------------------------- */
+
+task_reset_t port_wdt_reset_cause(void)
+{
+	uint32_t r = reset_reason;
+
+	return (r & EMU_RSTCAUSE_LOCKUP)			     ? TASK_RESET_TRAP
+	       : (r & (EMU_RSTCAUSE_WDOG0 | EMU_RSTCAUSE_WDOG1)) ? TASK_RESET_WATCHDOG
+	       : (r & EMU_RSTCAUSE_SYSREQ)			     ? TASK_RESET_SOFTWARE
+	       : (r & EMU_RSTCAUSE_PIN)			     ? TASK_RESET_PIN
+	       : (r & EMU_RSTCAUSE_POR)			     ? TASK_RESET_POWER_ON
+	       : (r & (EMU_RSTCAUSE_DVDDBOD | EMU_RSTCAUSE_DECBOD | EMU_RSTCAUSE_AVDDBOD))
+		       ? TASK_RESET_BROWN_OUT
+		       : TASK_RESET_OTHER;
+}
+
+#if LETS_WDT
+/* WDOG0 on the 1 kHz ULFRCO: 2^(3 + PERSEL) + 1 ticks, the first at least @p ms; it stops
+ * under a debugger and in EM2 */
+void port_wdt_start(uint16_t ms)
+{
+	uint32_t sel = 0;
+
+	while (sel < 15u && (8ul << sel) < ms) {
+		sel++;
+	}
+
+	CMU->CLKEN0_SET = CMU_CLKEN0_WDOG0;
+	CMU->WDOG0CLKCTRL = _CMU_WDOG0CLKCTRL_CLKSEL_ULFRCO;
+
+	WDOG0->EN_CLR = WDOG_EN_EN;
+	while (WDOG0->EN & WDOG_EN_DISABLING) {
+	}
+
+	WDOG0->CFG = sel << _WDOG_CFG_PERSEL_SHIFT;
+	WDOG0->EN_SET = WDOG_EN_EN;
+}
+
+void port_wdt_kick(void)
+{
+	while (WDOG0->SYNCBUSY & WDOG_SYNCBUSY_CMD) {
+	}
+
+	WDOG0->CMD = WDOG_CMD_CLEAR;
+}
+#endif
 
 /* ---- GPIO ----------------------------------------------------------------------------- */
 
