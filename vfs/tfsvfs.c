@@ -75,6 +75,40 @@ static int tfsvfs_dir(void *fs, uint16_t *index, char *name, vfs_info_t *info)
 	return 0;
 }
 
+/* an open file, in the list of all that are open */
+typedef struct tfsvfs_file {
+	tfs_file_t f; /* first: the vfs passes this pointer as the file */
+	struct tfsvfs_file *next;
+} tfsvfs_file_t;
+
+static tfsvfs_file_t *tfsvfs_files;
+
+/* a file is open: rm or mv over it would free blocks it still reads or writes */
+static bool tfsvfs_busy(tfs_t *fs, const char *name)
+{
+	int e = tfs_entry(fs, name);
+
+	for (tfsvfs_file_t *o = tfsvfs_files; e >= 0 && o != NULL; o = o->next) {
+		if (o->f.fs == fs && o->f.entry == (uint8_t)e) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static void tfsvfs_forget(tfsvfs_file_t *file)
+{
+	for (tfsvfs_file_t **p = &tfsvfs_files; *p != NULL; p = &(*p)->next) {
+		if (*p == file) {
+			*p = file->next;
+			break;
+		}
+	}
+
+	free(file);
+}
+
 static void *tfsvfs_open(void *fs, const char *name, int flags)
 {
 	uint8_t mode = TFS_WRITE;
@@ -95,14 +129,17 @@ static void *tfsvfs_open(void *fs, const char *name, int flags)
 		mode |= TFS_TRUNC;
 	}
 
-	tfs_file_t *f = malloc(sizeof(tfs_file_t));
+	tfsvfs_file_t *o = malloc(sizeof(tfsvfs_file_t));
 
-	if (f == NULL || tfs_open(fs, f, name, mode) < 0) {
-		free(f);
+	if (o == NULL || tfs_open(fs, &o->f, name, mode) < 0) {
+		free(o);
 		return NULL;
 	}
 
-	return f;
+	o->next = tfsvfs_files;
+	tfsvfs_files = o;
+
+	return &o->f;
 }
 
 static int tfsvfs_read(void *file, void *buffer, unsigned int length)
@@ -124,7 +161,7 @@ static int tfsvfs_close(void *file)
 {
 	int r = tfs_close(file);
 
-	free(file);
+	tfsvfs_forget(file);
 
 	return r;
 }
@@ -133,19 +170,19 @@ static int tfsvfs_abort(void *file)
 {
 	int r = tfs_abort(file);
 
-	free(file);
+	tfsvfs_forget(file);
 
 	return r;
 }
 
 static int tfsvfs_remove(void *fs, const char *name)
 {
-	return tfs_remove(fs, name);
+	return tfsvfs_busy(fs, name) ? -1 : tfs_remove(fs, name);
 }
 
 static int tfsvfs_rename(void *fs, const char *from, const char *to)
 {
-	return tfs_rename(fs, from, to);
+	return tfsvfs_busy(fs, to) ? -1 : tfs_rename(fs, from, to);
 }
 
 static int tfsvfs_usage(void *fs, uint32_t *size, uint32_t *avail)

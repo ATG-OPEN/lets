@@ -639,6 +639,14 @@ static void test_tree(void)
 	CHECK(vfs_file_is(held) && write(held, "held\n", 5) == 5);
 	CHECK(vfs_file_is(held) && task_stop_byname("hold") == 0 && !vfs_file_is(held));
 	CHECK(read_all("/mnt/ee/held", buf, sizeof(buf)) == 5 && strcmp(buf, "held\n") == 0);
+
+	/* an open file is not removed or replaced under its reader */
+	int rd = open("/mnt/ee/held", O_RDONLY, 0);
+
+	CHECK(rd > 2);
+	CHECK(system("rm /mnt/ee/held") == -1 && system("mv /mnt/ee/again /mnt/ee/held") == -1);
+	CHECK(system("mv /mnt/ee/held /mnt/ee/held2") == 0 && system("mv /mnt/ee/held2 /mnt/ee/held") == 0);
+	CHECK(read(rd, buf, sizeof(buf)) == 5 && close(rd) == 0);
 	CHECK(system("rm /mnt/ee/held") == 0 && system("rm /mnt/ee/again") == 0);
 	system("rm /mnt/ee/a");
 

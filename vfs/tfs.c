@@ -817,6 +817,13 @@ int tfs_rename(tfs_t *fs, const char *from, const char *to)
 	return tfs_entry_put(fs, (uint8_t)e, &t);
 }
 
+int tfs_entry(tfs_t *fs, const char *name)
+{
+	tfs_info_t t;
+
+	return (fs == NULL || name == NULL) ? -1 : tfs_find(fs, name, &t);
+}
+
 int tfs_stat(tfs_t *fs, const char *name, tfs_info_t *info)
 {
 	if (fs == NULL || name == NULL || info == NULL) {

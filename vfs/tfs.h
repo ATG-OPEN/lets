@@ -148,11 +148,20 @@ int tfs_close(tfs_file_t *f);
  */
 int tfs_abort(tfs_file_t *f);
 
-/** @brief Deletes a file. @return 0, or -1 when it does not exist. */
+/**
+ * @brief Deletes a file. @return 0, or -1 when it does not exist.
+ *
+ * Its blocks are free at once: a tfs_file_t still open on it would read or write blocks
+ * that another file gets next. The vfs (vfs/tfsvfs.c) refuses `rm` and `mv` of an open file;
+ * a direct caller must close it first. Same for the @p to of tfs_rename().
+ */
 int tfs_remove(tfs_t *fs, const char *name);
 
 /** @brief Renames a file, replacing @p to if it exists. @return 0, or -1. */
 int tfs_rename(tfs_t *fs, const char *from, const char *to);
+
+/** @brief The directory entry of a file, as tfs_file_t.entry. @return it, or -1 when none. */
+int tfs_entry(tfs_t *fs, const char *name);
 
 /** @brief Reads the entry of @p name. @return 0, or -1 when it does not exist. */
 int tfs_stat(tfs_t *fs, const char *name, tfs_info_t *info);

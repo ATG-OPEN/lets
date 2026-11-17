@@ -152,8 +152,8 @@ cd [path]   pwd   mkdir path     cd alone: home (VFS_HOME, /home)
 cat [-x] [path]         a file to its end; a node with one read. No path: stdin, with `<`
 echo text               the words, one line
 cp from to              any node or file to any file; `to` may be a directory
-mv from to              rename / move within one file system, or within the node table
-rm path                 a file, a RAM file or an empty directory (devices stay)
+mv from to              rename / move within one file system, or within the node table (not over an open tfs file)
+rm path                 a file, a RAM file or an empty directory (devices stay; a tfs file not while open)
 touch path              an empty file (a RAM file outside a file system)
 crc path                size and CRC-32, and "ok" / "BAD" against the CRC stored when written
 mount [-f] dev path     -f formats a device without a file system; no arguments: as df
