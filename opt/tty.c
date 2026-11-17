@@ -64,20 +64,38 @@ static inline __attribute__((always_inline)) bool tty_half_duplex(const tty_args
 	return a->mode == TTY_MODE_RS_SPX1 || a->mode == TTY_MODE_RS_SPX2;
 }
 
-/* the direction pin; DPX leaves it on, so only a change of mode and SPX need the off state */
-static inline __attribute__((always_inline)) void tty_pin(const tty_args_t *a, bool send)
+/*
+ * The direction pin; DPX leaves it on, so only a change of mode and SPX need the off state.
+ * This one is for the interrupts: they all have one priority, so none comes between its read
+ * and write of LATx. Code that a higher priority interrupt changes the same LATx from must
+ * change it atomically too.
+ */
+static inline __attribute__((always_inline)) void tty_pin_isr(const tty_args_t *a, bool send)
 {
 	if (a->pin == NULL || a->mode == TTY_MODE_STANDARD) {
 		return;
 	}
 
-	bool high = (a->mode == TTY_MODE_RS_SPX1 || a->mode == TTY_MODE_RS_DPX1) == send;
-
-	if (high) {
+	if ((a->mode == TTY_MODE_RS_SPX1 || a->mode == TTY_MODE_RS_DPX1) == send) {
 		*a->pin |= a->pin_mask;
 	} else {
 		*a->pin &= (uint16_t)~a->pin_mask;
 	}
+}
+
+/*
+ * The direction pin, from a task. Ports can have their pins in one LATx, and the transmit
+ * interrupt of one port drops its pin while a task changes another's: |= and &= read the
+ * register, change it and write it back, and an interrupt in between would have its change
+ * undone (a transmitter left on). IPL 7 holds all interrupts off for these few instructions.
+ */
+static void __attribute__((noinline)) tty_pin(const tty_args_t *a, bool send)
+{
+	uint16_t ipl;
+
+	SET_AND_SAVE_CPU_IPL(ipl, 7);
+	tty_pin_isr(a, send);
+	RESTORE_CPU_IPL(ipl);
 }
 
 static inline __attribute__((always_inline)) void tty_receive(tty_args_t *a, tty_uart_t *u)
@@ -132,7 +150,7 @@ static inline __attribute__((always_inline)) bool tty_transmit(tty_args_t *a, tt
 
 	if (!sent && (u->sta & TTY_STA_TRMT)) {
 		u->sta &= (uint16_t)~TTY_STA_UTXISEL0;
-		tty_pin(a, false);
+		tty_pin_isr(a, false);
 		return false;
 	}
 

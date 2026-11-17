@@ -29,6 +29,11 @@
  *
  * tty_register_node("ttyS1", &S1);
  * @endcode
+ * Ports can share a LATx: a task changes a pin with all interrupts held off,
+ * the UART interrupts (all of one priority) change theirs in turn. Other code
+ * that changes bits of that LATx must not undo it: use a bit write
+ * (`LATBbits.LATB4 = 1`, one instruction) or hold interrupts off too.
+ *
  * Commands: `ttyS1 -b BAUD`, `ttyS1 -m STD/SPX1/SPX2/DPX1/DPX2`, `ttyS1 -stat`.
  *
  * It owns the UART: leave it out of MCC, or take MCC's uartN.c out of the

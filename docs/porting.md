@@ -99,5 +99,6 @@ build is the one to check against. `top mem` shows what a board really uses.
 `opt/tty.c` is the UART of a PIC24F or dsPIC33E as a node, up to 6 ports (`-DTTY_PORTS=n`), sent and
 received by interrupts, with the direction pin of RS485 driven from the interrupt: see `opt/tty.h`.
 It owns its UARTs, so when MCC runs again it must leave them out, or `uartN.c` comes back and defines
-the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`. dsPIC33CK has
+the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`; keep the UARTs'
+transmit interrupts at one priority when their direction pins share a LATx (see `opt/tty.h`). dsPIC33CK has
 another UART: projects on it keep MCC's driver.
