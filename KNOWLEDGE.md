@@ -92,10 +92,8 @@ to the project.
 ## Known issues and TODO
 
 From the 2026-11 code review, open:
-- `tfs`: `rm` or `mv` of a file that is still open cross-links blocks.
 - Nested `system()` (a command run from inside a command): the outer command's `argv` is not
   safe across the inner call.
-- `shell_start` stops the first task named `shell`, which may be another shell than the one meant.
 - Task ids are reused without a generation number: a stale id can address a newer task.
 - No `errno`: callers get -1 without a reason.
 
@@ -104,6 +102,8 @@ Other:
   link mode (no prompt after a command) must accept or use it.
 - Branch `fixes-2026-11-16` (9905b7a, EFR32 tty receive through LDMA while the flash is busy) is
   not tested on hardware and not merged.
+- `tfs` directly (not through the vfs): `tfs_remove`/`tfs_rename` of an open file still frees its blocks;
+  a TFS_TRUNC writer's close drops the old file even if another handle reads it.
 - One shared stack: on a full PIC24 board about 720 B; `printf()` takes up to 350 B.
 - The default shell password `123456` is public: every product must set its own.
 
@@ -111,3 +111,6 @@ Other:
 
 - 2026-11: published (Apache 2.0); shell password and new-peer signal; `;` in the shell (4926db7);
   review fixes (43f8561); link-mode prompt (8131f4a).
+- 2026-11-17 (branch `sweep-2026-11-17`): `opt/tty.c` sets a direction pin from a task with IPL 7 (no lost
+  update of a shared LATx; host test `tests/test_tty.c`), `rm`/`mv` refuse an open tfs file, `shell` stops
+  only the console shell (`task_stop_arg`).
