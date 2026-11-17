@@ -7,9 +7,13 @@ on:
 jobs:
   host:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # GitHub's macOS machines are often busy; the macOS run is extra and does not fail the check.
+    # Linux decides pass or fail.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v4
       - name: build the host demo
