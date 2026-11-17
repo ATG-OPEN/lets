@@ -183,10 +183,20 @@ static inline __attribute__((always_inline)) bool tty_transmit(tty_args_t *a, tt
 		}                                                                    \
 	}
 
-#define TTY_TX_ON(n)                 \
-	case n:                      \
-		_U##n##TXIF = on;    \
-		_U##n##TXIE = on;    \
+/*
+ * Constants only: XC16 makes them single bset/bclr instructions. "= on" compiled to a
+ * read-modify-write of the whole IFSx/IECx register from task code, and UART3 and UART4
+ * share IFS5/IEC5: a flag the hardware or the other port's ISR set in between was lost.
+ */
+#define TTY_TX_ON(n)                         \
+	case n:                              \
+		if (on) {                    \
+			_U##n##TXIF = 1;     \
+			_U##n##TXIE = 1;     \
+		} else {                     \
+			_U##n##TXIE = 0;     \
+			_U##n##TXIF = 0;     \
+		}                            \
 		break
 
 #define TTY_RX_ON(n)                 \
