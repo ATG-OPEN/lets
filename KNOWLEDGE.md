@@ -5,6 +5,10 @@ title: LETS
 summary: LETS (Linux-like Embedded Task Scheduler) - a small cooperative kernel for 16-bit MCUs where devices, files and commands are nodes reached with open/read/write/close/system, with a shell and a script language.
 repo: github.com/ATG-OPEN/lets
 path: ~/Firmware/lets
+ports: []
+runs_on: []
+languages: [c]
+tags: [kernel, mcu, shell, scheduler, script]
 status: active
 updated: 2026-11-17
 ---
