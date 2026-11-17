@@ -176,11 +176,12 @@ task_reset_t port_wdt_reset_cause(void)
 {
 	uint32_t r = reset_reason;
 
-	return (r & EMU_RSTCAUSE_LOCKUP)			     ? TASK_RESET_TRAP
+	/* POR first: the other bits are not valid with it (a kit's power-on reads POR + PIN) */
+	return (r & EMU_RSTCAUSE_POR)				     ? TASK_RESET_POWER_ON
+	       : (r & EMU_RSTCAUSE_LOCKUP)			     ? TASK_RESET_TRAP
 	       : (r & (EMU_RSTCAUSE_WDOG0 | EMU_RSTCAUSE_WDOG1)) ? TASK_RESET_WATCHDOG
 	       : (r & EMU_RSTCAUSE_SYSREQ)			     ? TASK_RESET_SOFTWARE
 	       : (r & EMU_RSTCAUSE_PIN)			     ? TASK_RESET_PIN
-	       : (r & EMU_RSTCAUSE_POR)			     ? TASK_RESET_POWER_ON
 	       : (r & (EMU_RSTCAUSE_DVDDBOD | EMU_RSTCAUSE_DECBOD | EMU_RSTCAUSE_AVDDBOD))
 		       ? TASK_RESET_BROWN_OUT
 		       : TASK_RESET_OTHER;
@@ -208,12 +209,13 @@ void port_wdt_start(uint16_t ms)
 	WDOG0->EN_SET = WDOG_EN_EN;
 }
 
+/* once per scheduler loop: a clear takes a few ULFRCO ticks (~3 ms) to sync, and waiting for it
+ * slowed the loop to ~4 ms (262/s on a ZG23 kit, 2026-11-17); the kicks meanwhile are skipped */
 void port_wdt_kick(void)
 {
-	while (WDOG0->SYNCBUSY & WDOG_SYNCBUSY_CMD) {
+	if (!(WDOG0->SYNCBUSY & WDOG_SYNCBUSY_CMD)) {
+		WDOG0->CMD = WDOG_CMD_CLEAR;
 	}
-
-	WDOG0->CMD = WDOG_CMD_CLEAR;
 }
 #endif
 
