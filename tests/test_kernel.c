@@ -287,6 +287,13 @@ static int selfstop(void *args, uint64_t now)
 	return 0;
 }
 
+static int twin(void *args, uint64_t now)
+{
+	return 1000;
+}
+
+static int twin_a, twin_b;
+
 static int beats;
 static uint64_t beat_first, beat_last;
 
@@ -340,6 +347,14 @@ static int checks(void *args, uint64_t t)
 		void *a = malloc(100);
 		free(a);
 		CHECK(alloc_free_size() == free_now);
+
+		/* two tasks of one name: the one of an argument stops */
+		CHECK(task_create("twin", twin, &twin_a) != NULL);
+		CHECK(task_create("twin", twin, &twin_b) != NULL);
+		CHECK(task_stop_arg("twin", &twin_b) == 0);
+		CHECK(task_stop_arg("twin", &twin_b) == -1);
+		CHECK(task_stop_arg("twin", &twin_a) == 0);
+		CHECK(task_stop_byname("twin") == -1);
 
 		/* nodes: open by name, write, read */
 		CHECK(vfs_node_create("sink", false, "pong", &sink_node) >= 0);

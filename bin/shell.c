@@ -855,7 +855,7 @@ int shell_start(void *args, int argc, char *argv[])
 	/* nobody is on the console: this shell takes over the memory of that one */
 	if (shell_console_idle && vfs_console() < 0) {
 		shell_console_idle = false;
-		task_stop_byname("shell");
+		task_stop_arg("shell", &shell_console); /* not another shell */
 	} else {
 		s = malloc(sizeof(shell_t));
 

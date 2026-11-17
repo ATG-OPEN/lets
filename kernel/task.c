@@ -142,7 +142,8 @@ int task_count(void)
 	return count;
 }
 
-int task_stop_byname(char *name)
+/* the first task called @name, and with @arg unless @any */
+static int task_stop_match(const char *name, const void *arg, bool any)
 {
 	if (name == NULL) {
 		return -1;
@@ -155,7 +156,7 @@ int task_stop_byname(char *name)
 			continue;
 		}
 
-		if (strcmp(t->info.name, name) != 0) {
+		if (strcmp(t->info.name, name) != 0 || (!any && t->arg != arg)) {
 			continue;
 		}
 
@@ -170,6 +171,16 @@ int task_stop_byname(char *name)
 	}
 
 	return -1;
+}
+
+int task_stop_byname(char *name)
+{
+	return task_stop_match(name, NULL, true);
+}
+
+int task_stop_arg(const char *name, const void *arg)
+{
+	return task_stop_match(name, arg, false);
 }
 
 task_t *task_create(const char *name, int (*entry)(void *arg, uint64_t system_time), void *arg)

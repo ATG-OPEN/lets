@@ -105,6 +105,13 @@ int task_count(void);
  */
 int task_stop_byname(char *name);
 
+/**
+ * @brief Stops the task called @p name whose argument is @p arg, as task_stop_byname():
+ * one of several tasks of a name, e.g. a shell of its memory.
+ * @return 0, or -1 when there is no such task.
+ */
+int task_stop_arg(const char *name, const void *arg);
+
 /** @brief true when the running task has stopped itself and must return. */
 bool task_stopping(void);
 
