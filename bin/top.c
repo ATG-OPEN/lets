@@ -123,25 +123,28 @@ static void top_column(top_text_t *line, const char *text, uint8_t length, uint8
 	top_put(line, " ");
 }
 
-/* why the chip last reset, from RCON (PIC24 / dsPIC33); "-" on a PC */
-static const char *top_reset(uint16_t rcon)
+/* why the chip last reset, and the fault the kernel kept, e.g. "watchdog (late: link)" */
+static void top_reset(top_text_t *l)
 {
-	static const struct {
-		uint16_t bit;
-		const char *name;
-	} causes[] = {
-		{0x8000u, "trap"},     {0x4000u, "illegal opcode"}, {0x0200u, "config mismatch"},
-		{0x0080u, "MCLR pin"}, {0x0040u, "software"},	   {0x0010u, "watchdog"},
-		{0x0002u, "brown-out"}, {0x0001u, "power-on"},
-	};
+	static const char *const names[] = {"-",	"power-on", "brown-out", "MCLR pin",
+					    "software", "watchdog", "trap"};
+	const task_fault_t *f = task_fault();
+	unsigned int r = (unsigned int)task_reset_reason();
 
-	for (unsigned int i = 0; i < sizeof(causes) / sizeof(causes[0]); i++) {
-		if (rcon & causes[i].bit) {
-			return causes[i].name;
-		}
+	top_put(l, names[(r < sizeof(names) / sizeof(names[0])) ? r : 0u]);
+
+	if (f == NULL) {
+		return;
 	}
 
-	return "-";
+	if (f->kind == TASK_FAULT_TRAP) {
+		top_put(l, " ");
+		top_uint(l, f->code, 0, ' ');
+	}
+
+	top_put(l, (f->kind == TASK_FAULT_LATE) ? " (late: " : " (in: ");
+	top_put(l, (f->task[0] != '\0') ? f->task : "-");
+	top_put(l, ")");
 }
 
 static const char *top_state(uint8_t state)
@@ -224,7 +227,7 @@ static bool top_make(top_t *s)
 		}
 
 		top_put(&l, "  reset ");
-		top_put(&l, top_reset(task_reset_cause()));
+		top_reset(&l);
 		s->step = TOP_MEMORY;
 		break;
 	}
@@ -336,6 +339,20 @@ int top(void *args, int argc, char *argv[])
 		}
 
 		printf("reset %04X\n", task_reset_cause());
+
+#if LETS_WDT
+		task_t *t = task_get_data();
+		uint32_t now = (uint32_t)task_get_system_time();
+
+		printf("watchdog %u ms\n", (unsigned)LETS_WDT_MS);
+
+		for (int i = 0; i < TASKS_MAX_COUNT; i++) {
+			if (t[i].state != TASK_UNUSED && t[i].deadline != 0) {
+				printf("  %s %u ms, alive %lu ms ago\n", t[i].info.name, t[i].deadline,
+				       (unsigned long)((now - t[i].alive) / 1000u));
+			}
+		}
+#endif
 
 		return 0;
 	}

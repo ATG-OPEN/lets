@@ -45,6 +45,10 @@ build/test_kernel: tests/test_kernel.c $(KERNEL) | build
 build/test_sleep: tests/test_sleep.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) tests/test_sleep.c $(KERNEL) -o $@
 
+# the scheduler's watchdog (LETS_WDT) on a fake clock and a fake watchdog
+build/test_wdt: tests/test_wdt.c $(KERNEL) | build
+	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DLETS_WDT=1 tests/test_wdt.c $(KERNEL) -o $@
+
 build/as_test: argscript/test/as_test.c argscript/argscript.c lib/args.c | build
 	$(CC) -std=c99 $(WARN) $(SAN) -include fcntl.h -Dopen=t_open -Dread=t_read -Dwrite=t_write \
 	    -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek -Dmalloc=t_malloc -Dfree=t_free \
@@ -64,9 +68,10 @@ LIBS    = $(filter-out lib/uuid.c opt/tty.c,$(wildcard lib/*.c) $(wildcard opt/*
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done
 
-test: build/test_kernel build/test_sleep build/test_vfs build/as_test build/test_nrf52 build/test_tty libs
+test: build/test_kernel build/test_sleep build/test_wdt build/test_vfs build/as_test build/test_nrf52 build/test_tty libs
 	./build/test_kernel
 	./build/test_sleep
+	./build/test_wdt
 	./build/test_vfs
 	./build/as_test
 	./build/test_nrf52

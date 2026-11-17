@@ -42,6 +42,13 @@
 #endif
 #define TASK_NAME_SIZE	16u /**< Name length, including the terminating 0. */
 
+#ifndef LETS_WDT
+#define LETS_WDT 0 /**< 1: the scheduler runs the hardware watchdog (see task_watch()). */
+#endif
+#ifndef LETS_WDT_MS
+#define LETS_WDT_MS 2000u /**< Watchdog period asked of the port (a PIC24 takes its config bits). */
+#endif
+
 /** State of a slot in the task table. */
 typedef enum {
 	TASK_UNUSED = 0,   /**< Free slot. */
@@ -81,7 +88,32 @@ typedef struct {
 	uint32_t wake_tick;	/**< While sleeping: the time to wake up, in us, wraps. */
 	uint8_t state;		/**< A task_state_t. */
 	task_info_t info;	/**< Statistics. */
+#if LETS_WDT
+	uint16_t deadline; /**< ms it may go without task_alive(); 0: not watched. */
+	uint32_t alive;	   /**< Time of its last task_alive(), in us, wraps. */
+#endif
 } task_t;
+
+/** Why the chip last reset: task_reset_reason(). */
+typedef enum {
+	TASK_RESET_OTHER = 0,
+	TASK_RESET_POWER_ON,
+	TASK_RESET_BROWN_OUT,
+	TASK_RESET_PIN,
+	TASK_RESET_SOFTWARE,
+	TASK_RESET_WATCHDOG,
+	TASK_RESET_TRAP,
+} task_reset_t;
+
+/** What the kernel saw just before it let the chip reset (LETS_WDT), kept across the reset. */
+typedef struct {
+	uint16_t kind;		   /**< TASK_FAULT_LATE or TASK_FAULT_TRAP. */
+	uint16_t code;		   /**< The trap's number (as given to task_trap()). */
+	char task[TASK_NAME_SIZE]; /**< The task late or running then, "" outside a task. */
+} task_fault_t;
+
+#define TASK_FAULT_LATE 1u /**< A watched task missed its deadline: the kicks stopped. */
+#define TASK_FAULT_TRAP 2u /**< task_trap(): a CPU trap, then a reset. */
 
 /**
  * @brief Prepares the scheduler. Call once, before any other task function.
@@ -150,6 +182,46 @@ int task_stack(size_t *peak, size_t *size);
 
 /** @brief RCON at start-up: why the chip last reset (0 on a PC). */
 uint16_t task_reset_cause(void);
+
+/** @brief Why the chip last reset, the same on every port. */
+task_reset_t task_reset_reason(void);
+
+/**
+ * @brief The fault before the last reset, or NULL when the reset had none (or LETS_WDT is 0).
+ */
+const task_fault_t *task_fault(void);
+
+/**
+ * @brief Puts a task under the watchdog (LETS_WDT): it must call task_alive() at least every
+ * @p deadline_ms, or the scheduler stops kicking the watchdog and the chip resets.
+ *
+ * Tasks are not watched unless they ask, so idle and slow tasks never hold the kicks back. The
+ * deadline counts sleeping too: it must be longer than the task's longest sleep. A task that never
+ * returns stops every kick on its own, watched or not. With LETS_WDT 0 this does nothing.
+ *
+ * @param t           The task, NULL for the running one.
+ * @param deadline_ms 1 to 65535, or 0 to stop watching it.
+ * @return 0, or -1 when there is no such task.
+ */
+int task_watch(task_t *t, uint16_t deadline_ms);
+
+/** @brief The running task checks in: it is alive and making progress (see task_watch()). */
+void task_alive(void);
+
+/**
+ * @brief Records a CPU trap with the running task and resets the chip (`reset` on XC16, else
+ * reboot_reset()). With LETS_WDT on a PIC24 the kernel also defines MCC's
+ * TRAPS_halt_on_error() to call it (unless LETS_WDT_NO_TRAPS), so a trap restarts the board.
+ */
+void task_trap(uint16_t code) __attribute__((noreturn));
+
+/*
+ * Port hooks for LETS_WDT. task.c has PIC24 / dsPIC33 versions (weak); another port defines
+ * them. port_wdt_reset_cause() is used with LETS_WDT 0 too (task_reset_reason()).
+ */
+void port_wdt_start(uint16_t ms);     /**< Starts the watchdog, about @p ms. */
+void port_wdt_kick(void);	      /**< Clears it. */
+task_reset_t port_wdt_reset_cause(void); /**< Why the chip reset: called once, at start-up. */
 
 /** @brief Runs the scheduler loop. Never returns. */
 void tasks_start(void);

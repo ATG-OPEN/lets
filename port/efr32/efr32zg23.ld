@@ -62,6 +62,13 @@ SECTIONS
 		__bss_end__ = .;
 	} > RAM
 
+	/* not cleared at start-up: what the kernel keeps across a reset (LETS_WDT) */
+	.noinit (NOLOAD) :
+	{
+		. = ALIGN(4);
+		*(.noinit*)
+	} > RAM
+
 	.heap (NOLOAD) :
 	{
 		. = ALIGN(8);

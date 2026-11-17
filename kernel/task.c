@@ -28,6 +28,31 @@ static task_t tasks[TASKS_MAX_COUNT];
 static int current = -1; /* index of the running task, -1 outside a task */
 static task_streams_t task_main = {-1, -1, -1, 0}; /* the streams outside a task */
 static uint16_t task_reset; /* RCON at start-up */
+static uint8_t task_reason; /* a task_reset_t */
+
+/* the board's reset, in bin/reboot.c or its own */
+extern void reboot_reset(void) __attribute__((weak));
+
+#if LETS_WDT
+#define TASK_FAULT_MAGIC 0x4C57u
+
+/* kept across a reset: not cleared at start-up */
+#if defined(__XC16__)
+#define TASK_NOINIT __attribute__((persistent))
+#elif defined(__arm__)
+#define TASK_NOINIT __attribute__((section(".noinit")))
+#else
+#define TASK_NOINIT
+#endif
+
+static TASK_NOINIT struct {
+	uint16_t magic;
+	task_fault_t fault;
+} task_fault_next; /* written just before the reset */
+
+static task_fault_t task_fault_last; /* what it held at start-up */
+static bool task_wdt_late;	     /* a watched task was late: no more kicks */
+#endif
 
 /* vfs: a new task holds its streams open, one that stopped lets them go */
 extern void vfs_streams_hold(int in, int out) __attribute__((weak));
@@ -70,6 +95,27 @@ void task_initialize(uint64_t (*handle)(void))
 
 #if defined(__XC16__)
 	task_reset = RCON;
+#endif
+	task_reason = (uint8_t)port_wdt_reset_cause();
+
+#if LETS_WDT
+	task_fault_last.kind = 0;
+
+	/* after a power-up the RAM holds anything */
+	if (task_fault_next.magic == TASK_FAULT_MAGIC && task_reason != TASK_RESET_POWER_ON &&
+	    task_reason != TASK_RESET_BROWN_OUT) {
+		task_fault_last = task_fault_next.fault;
+
+		if (task_fault_last.kind == TASK_FAULT_TRAP) {
+			task_reason = TASK_RESET_TRAP;
+		}
+	}
+
+	task_fault_next.magic = 0;
+	task_wdt_late = false;
+#endif
+
+#if defined(__XC16__)
 	RCON &= (uint16_t)~TASK_RESET_FLAGS;
 
 	/* what is above the stack pointer now: task_stack() reads how far it was used */
@@ -202,6 +248,9 @@ task_t *task_create(const char *name, int (*entry)(void *arg, uint64_t system_ti
 		t->wake_tick = 0;
 		t->streams = *task_streams();
 		t->info.worst = 0;
+#if LETS_WDT
+		t->deadline = 0;
+#endif
 
 		task_set_name(t, name);
 
@@ -251,10 +300,177 @@ uint16_t task_reset_cause(void)
 	return task_reset;
 }
 
+task_reset_t task_reset_reason(void)
+{
+	return (task_reset_t)task_reason;
+}
+
+const task_fault_t *task_fault(void)
+{
+#if LETS_WDT
+	return (task_fault_last.kind != 0) ? &task_fault_last : NULL;
+#else
+	return NULL;
+#endif
+}
+
+#if LETS_WDT
+/* kept for after the reset: what happened, and in which task */
+static void task_fault_save(uint16_t kind, uint16_t code, int slot)
+{
+	task_fault_t *f = &task_fault_next.fault;
+
+	f->kind = kind;
+	f->code = code;
+	f->task[0] = '\0';
+
+	if (slot >= 0 && slot < (int)TASKS_MAX_COUNT) {
+		memcpy(f->task, tasks[slot].info.name, TASK_NAME_SIZE);
+	}
+
+	task_fault_next.magic = TASK_FAULT_MAGIC;
+}
+
+/* true while every watched task has checked in within its deadline */
+static bool task_wdt_check(uint32_t now)
+{
+	for (int i = 0; i < TASKS_MAX_COUNT; i++) {
+		task_t *t = &tasks[i];
+
+		if (t->state == TASK_UNUSED || t->deadline == 0) {
+			continue;
+		}
+
+		if (now - t->alive > (uint32_t)t->deadline * 1000u) {
+			task_fault_save(TASK_FAULT_LATE, 0, i);
+			task_wdt_late = true; /* for good: the reset is coming */
+
+			return false;
+		}
+	}
+
+	return true;
+}
+#endif
+
+int task_watch(task_t *t, uint16_t deadline_ms)
+{
+#if LETS_WDT
+	if (t == NULL && current >= 0 && current < (int)TASKS_MAX_COUNT) {
+		t = &tasks[current];
+	}
+
+	if (t == NULL || t->state == TASK_UNUSED) {
+		return -1;
+	}
+
+	t->alive = (uint32_t)task_get_system_time();
+	t->deadline = deadline_ms;
+#else
+	(void)t;
+	(void)deadline_ms;
+#endif
+
+	return 0;
+}
+
+void task_alive(void)
+{
+#if LETS_WDT
+	if (current >= 0 && current < (int)TASKS_MAX_COUNT) {
+		tasks[current].alive = (uint32_t)task_get_system_time();
+	}
+#endif
+}
+
+void task_trap(uint16_t code)
+{
+#if LETS_WDT
+	task_fault_save(TASK_FAULT_TRAP, code, current);
+#else
+	(void)code;
+#endif
+
+#if defined(__XC16__)
+	__asm__ volatile("reset");
+#else
+	if (reboot_reset != NULL) {
+		reboot_reset();
+	}
+#endif
+
+	for (;;) {
+	}
+}
+
+#if defined(__XC16__)
+/*
+ * PIC24 / dsPIC33: the watchdog's period is in the config bits (FWPSA, WDTPS), and with
+ * FWDTEN = ON_SWDTEN the kernel turns it on. A port may define its own.
+ */
+task_reset_t __attribute__((weak)) port_wdt_reset_cause(void)
+{
+	uint16_t r = task_reset;
+
+	if (r & 0xC000u) { /* TRAPR, IOPUWR (illegal opcode) */
+		return TASK_RESET_TRAP;
+	}
+
+	return (r & 0x0010u)   ? TASK_RESET_WATCHDOG
+	       : (r & 0x0040u) ? TASK_RESET_SOFTWARE
+	       : (r & 0x0080u) ? TASK_RESET_PIN
+	       : (r & 0x0001u) ? TASK_RESET_POWER_ON
+	       : (r & 0x0002u) ? TASK_RESET_BROWN_OUT
+			       : TASK_RESET_OTHER;
+}
+
+#if LETS_WDT
+void __attribute__((weak)) port_wdt_start(uint16_t ms)
+{
+	(void)ms;
+	RCONbits.SWDTEN = 1;
+}
+
+void __attribute__((weak)) port_wdt_kick(void)
+{
+	__asm__ volatile("clrwdt");
+}
+
+/* MCC's traps.c ends every trap here (its version is weak): record it and start again */
+#if !defined(LETS_WDT_NO_TRAPS)
+void TRAPS_halt_on_error(uint16_t code)
+{
+	task_trap(code);
+}
+#endif
+#endif
+#else
+/* a port without them (a PC): no watchdog, no reason */
+task_reset_t __attribute__((weak)) port_wdt_reset_cause(void)
+{
+	return TASK_RESET_OTHER;
+}
+
+#if LETS_WDT
+void __attribute__((weak)) port_wdt_start(uint16_t ms)
+{
+	(void)ms;
+}
+
+void __attribute__((weak)) port_wdt_kick(void)
+{
+}
+#endif
+#endif
+
 void tasks_start(void)
 {
 	uint64_t now = task_get_system_time();
 	uint32_t loop_start = (uint32_t)now;
+
+#if LETS_WDT
+	port_wdt_start(LETS_WDT_MS);
+#endif
 
 	for (;;) {
 		/*
@@ -267,8 +483,16 @@ void tasks_start(void)
 		task_loop_time = (uint32_t)now - loop_start;
 		loop_start = (uint32_t)now;
 
-#if defined(__XC16__)
-		__asm__ volatile("clrwdt"); /* a task that never returns resets the board */
+		/*
+		 * A task that never returns stops the kicks; with LETS_WDT a watched task
+		 * that is late does too. Either way the watchdog resets the chip.
+		 */
+#if LETS_WDT
+		if (!task_wdt_late && task_wdt_check((uint32_t)now)) {
+			port_wdt_kick();
+		}
+#elif defined(__XC16__)
+		__asm__ volatile("clrwdt");
 #endif
 
 		for (current = 0; current < TASKS_MAX_COUNT; current++) {

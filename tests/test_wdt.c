@@ -1,0 +1,265 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2026 ATG */
+
+/*
+ * Watchdog host test (LETS_WDT=1), on a fake clock and a fake watchdog: the port hooks are
+ * defined here. A reset is a longjmp() back to main(), which starts the kernel again, as a
+ * chip does; the fault record survives it as it survives a reset in no-init RAM.
+ *
+ *   boot 0  watched tasks check in, idle / busy / unwatched tasks do not: kicks go on;
+ *           then "bad" stops checking in: the kicks stop and the fake watchdog fires
+ *   boot 1  the reset says watchdog, late: bad; a task traps (task_trap())
+ *   boot 2  the reset says trap 2, in: crasher; the next reset has no fault
+ *   boot 3  overhead: one pass with 15 watched tasks against 15 unwatched ones
+ */
+#include "../kernel/task.h"
+#include "../kernel/alloc.h"
+#include "../vfs/vfs.h"
+
+#include <setjmp.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+ALLOC_INIT_HEAP(4096);
+
+static int failures;
+
+#define CHECK(c)                                                                                   \
+	do {                                                                                       \
+		if (!(c)) {                                                                        \
+			fprintf(stderr, "wdt: FAILED line %d: %s\n", __LINE__, #c);                \
+			failures++;                                                                \
+		}                                                                                  \
+	} while (0)
+
+/* ---- the fake chip -------------------------------------------------------------------- */
+
+static jmp_buf chip;
+static uint64_t fake_us;	/* the clock: 10 us more on every read */
+static uint64_t wdt_ms;		/* 0: not started */
+static uint64_t last_kick;
+static unsigned long kicks;
+static task_reset_t cause = TASK_RESET_POWER_ON;
+
+static void reset(task_reset_t why, int boot)
+{
+	cause = why;
+	wdt_ms = 0;
+	longjmp(chip, boot);
+}
+
+static int boot; /* the boot this is, from main() */
+
+static uint64_t now_us(void)
+{
+	fake_us += 10;
+
+	if (wdt_ms != 0 && fake_us - last_kick > wdt_ms * 1000u) {
+		reset(TASK_RESET_WATCHDOG, boot + 1);
+	}
+
+	return fake_us;
+}
+
+void port_wdt_start(uint16_t ms)
+{
+	wdt_ms = ms;
+	last_kick = fake_us;
+}
+
+void port_wdt_kick(void)
+{
+	last_kick = fake_us;
+	kicks++;
+}
+
+task_reset_t port_wdt_reset_cause(void)
+{
+	return cause;
+}
+
+/* task_trap() resets through here */
+void reboot_reset(void)
+{
+	reset(TASK_RESET_SOFTWARE, boot + 1);
+}
+
+/* ---- boot 0 --------------------------------------------------------------------------- */
+
+static int idle(void *arg, uint64_t now)
+{
+	return 30000; /* unwatched, asleep for longer than any deadline */
+}
+
+static int busy(void *arg, uint64_t now)
+{
+	return 0; /* unwatched, never checks in */
+}
+
+static int good(void *arg, uint64_t now)
+{
+	task_alive();
+	return 50;
+}
+
+static int bad(void *arg, uint64_t now)
+{
+	if (now < 5000000u) {
+		task_alive(); /* until 5 s: then it is stuck, though it still returns */
+	}
+
+	return 20;
+}
+
+/* watched, then not: stops checking in once it is not */
+static int quits(void *arg, uint64_t now)
+{
+	if (now < 1000000u) {
+		task_alive();
+	} else {
+		task_watch(NULL, 0);
+	}
+
+	return 10;
+}
+
+static int check0(void *arg, uint64_t now)
+{
+	if (now >= 4900000u) {
+		/* every watched task on time so far: a kick on every pass */
+		CHECK(kicks > 1000);
+		CHECK(fake_us - last_kick < 1000u);
+		return -1;
+	}
+
+	return 100;
+}
+
+/* ---- boot 1 --------------------------------------------------------------------------- */
+
+static int crasher(void *arg, uint64_t now)
+{
+	task_trap(2);
+}
+
+/* ---- boot 3 --------------------------------------------------------------------------- */
+
+static int spin(void *arg, uint64_t now)
+{
+	task_alive();
+	return 0;
+}
+
+static double real_s(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec + (double)t.tv_nsec / 1e9;
+}
+
+#define PASSES 20000ul
+
+static task_t *spinners[TASKS_MAX_COUNT];
+static double pass_s[2];
+
+static int measure(void *arg, uint64_t now)
+{
+	static int round;
+	static unsigned long from;
+	static double t0;
+
+	if (kicks - from < PASSES && round > 0) {
+		return 0;
+	}
+
+	if (round > 0) {
+		pass_s[round - 1] = (real_s() - t0) / (double)(kicks - from);
+	}
+
+	if (round == 2) {
+		fprintf(stderr, "wdt: a pass with 15 tasks: %.2f us watched, %.2f us not\n",
+			pass_s[0] * 1e6, pass_s[1] * 1e6);
+		CHECK(pass_s[0] < 3 * pass_s[1]);
+		fprintf(stderr, failures ? "wdt: FAILED\n" : "wdt: ok\n");
+		exit(failures ? 1 : 0);
+	}
+
+	/* round 0: watch them all; round 1: none */
+	for (int i = 0; spinners[i] != NULL; i++) {
+		task_watch(spinners[i], (round == 0) ? 100 : 0);
+	}
+
+	round++;
+	from = kicks;
+	t0 = real_s();
+
+	return 0;
+}
+
+/* ---- the boots ------------------------------------------------------------------------ */
+
+static void stuck(int sig)
+{
+	fprintf(stderr, "wdt: FAILED, stuck in boot %d\n", boot);
+	_exit(1);
+}
+
+int main(void)
+{
+	signal(SIGALRM, stuck);
+	alarm(20);
+
+	vfs_initialize();
+
+	boot = setjmp(chip);
+	task_initialize(now_us);
+
+	const task_fault_t *f = task_fault();
+
+	switch (boot) {
+	case 0:
+		CHECK(task_reset_reason() == TASK_RESET_POWER_ON && f == NULL);
+		task_create("idle", idle, NULL);
+		task_create("busy", busy, NULL);
+		task_watch(task_create("good", good, NULL), 100);
+		task_watch(task_create("bad", bad, NULL), 200);
+		task_watch(task_create("quits", quits, NULL), 100);
+		task_create("check0", check0, NULL);
+		CHECK(task_watch(NULL, 100) == -1); /* outside a task */
+		break;
+
+	case 1:
+		/* bad's last check-in was just before 5 s: the kicks stopped 200 ms later */
+		fprintf(stderr, "wdt: last kick at %.3f s, reset at %.3f s\n", last_kick / 1e6,
+			fake_us / 1e6);
+		CHECK(last_kick >= 5000000u && last_kick <= 5300000u);
+		CHECK(fake_us - last_kick > LETS_WDT_MS * 1000u);
+		CHECK(task_reset_reason() == TASK_RESET_WATCHDOG);
+		CHECK(f != NULL && f->kind == TASK_FAULT_LATE && strcmp(f->task, "bad") == 0);
+		task_create("crasher", crasher, NULL);
+		break;
+
+	case 2:
+		CHECK(task_reset_reason() == TASK_RESET_TRAP);
+		CHECK(f != NULL && f->kind == TASK_FAULT_TRAP && f->code == 2 &&
+		      strcmp(f->task, "crasher") == 0);
+		reset(TASK_RESET_PIN, 3);
+		break;
+
+	default:
+		CHECK(task_reset_reason() == TASK_RESET_PIN && f == NULL);
+
+		for (int i = 0; i < TASKS_MAX_COUNT - 1; i++) {
+			spinners[i] = task_create("spin", spin, NULL);
+		}
+
+		task_create("measure", measure, NULL);
+		break;
+	}
+
+	tasks_start();
+	return 1;
+}
