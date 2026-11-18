@@ -16,7 +16,7 @@
 
 #include "vfs.h"
 
-#include "../bin/tmp.h"
+#include "tmp.h"
 #include "../kernel/task.h"
 
 #include <stddef.h>

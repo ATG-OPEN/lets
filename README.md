@@ -72,7 +72,7 @@ same with file systems: try `ls /`, `ls -l /dev`, `cd /mnt/ee`, `echo hi > f`, `
 
 ## On the MCU
 
-Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/bin.c`,
+Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`, `vfs/bin.c`,
 `lib/args.c` and `port/pic24/wdt.c` (the watchdog, reset-cause and stack hooks; needed with or without
 `LETS_WDT`) to your MPLAB X project (XC16), plus any `opt/` node your board uses (the PIC24 UART
 `opt/tty.h` is `port/pic24/tty.c`; the device ID is `port/pic24/uuid.c`). Without

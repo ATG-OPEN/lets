@@ -10,7 +10,7 @@
 #include "../bin/date.h"
 #include "../bin/kill.h"
 #include "../bin/reboot.h"
-#include "../bin/tmp.h"
+#include "tmp.h"
 #include "../bin/top.h"
 #include "../bin/lines.h"
 #include "../kernel/task.h"

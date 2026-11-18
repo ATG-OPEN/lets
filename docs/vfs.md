@@ -24,7 +24,7 @@ in the home), `ls` lists plain names (`ls -p` marks the directories, `ls -l` sho
 
 | | |
 |-|-|
-| always | `vfs/node.c` (the table), `vfs/vfs.c` (the tree), `vfs/posix.c` (`open`, `read`, `write`, `close`, `lseek`, `system`), `bin/tmp.c` (RAM files) |
+| always | `vfs/node.c` (the table), `vfs/vfs.c` (the tree), `vfs/posix.c` (`open`, `read`, `write`, `close`, `lseek`, `system`), `vfs/tmp.c` (RAM files) |
 | always too | `vfs/bin.c`: the built-in commands in flash, `ls cat echo rm mv touch cd pwd mkdir cp mount umount df date uptime std kill top shell reboot sync passwd` (+ `crc mkfs` with tfs), the prompt, Tab on paths; `bin/date.c` the system time |
 | with tfs | `vfs/tfs.c`, `vfs/tfsvfs.c` (tfs as the mount type "tfs"), drivers from `vfs/dev/`, optionally `vfs/ed.c` |
 | a tiny `/boot` | `vfs/onefs.c`: the mount type "one", one file (rc) on a memory too small for tfs |

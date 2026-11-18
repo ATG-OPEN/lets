@@ -8,7 +8,7 @@
 
 #include "tmp.h"
 
-#include "../vfs/vfs.h"
+#include "vfs.h"
 
 #include <unistd.h>
 #include <string.h>

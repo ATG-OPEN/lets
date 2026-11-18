@@ -4,7 +4,7 @@
 #ifndef TMP_H
 #define TMP_H
 
-#include "../vfs/vfs.h"
+#include "vfs.h"
 
 /**
  * @brief Creates a RAM file (126 bytes) named @p name, as it is stored in the table.
