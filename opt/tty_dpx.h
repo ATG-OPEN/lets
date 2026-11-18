@@ -19,7 +19,7 @@
  * clock: two ports of one board are read some us apart, and two boards' clocks differ, so even
  * equal seeds drift apart after a swap or two.
  *
- * Pure (no I/O, no clock of its own): opt/tty.c calls it with the time in ms, and
+ * Pure (no I/O, no clock of its own): port/pic24/tty.c calls it with the time in ms, and
  * tests/test_tty_dpx.c plays it on a cable model.
  */
 
@@ -68,7 +68,7 @@ static inline void tty_dpx_wait(tty_dpx_t *s, uint32_t now)
  * @param s    The port's state.
  * @param now  The time, in ms.
  * @param seed Anything that differs between the ports of a board, and between boards if it
- *             can (opt/tty.c: the port, the address of its tty_args_t, the us clock).
+ *             can (port/pic24/tty.c: the port, the address of its tty_args_t, the us clock).
  */
 static inline void tty_dpx_init(tty_dpx_t *s, uint16_t seed, uint32_t now)
 {

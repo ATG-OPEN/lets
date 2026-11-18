@@ -2,7 +2,7 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * Host test of the PIC24 tty (opt/tty.c) against tests/pic24/xc.h. Two ports keep their RS485
+ * Host test of the PIC24 tty (port/pic24/tty.c) against tests/pic24/xc.h. Two ports keep their RS485
  * direction pins in one LATF. A second thread plays the interrupts: it runs port 2's transmit
  * interrupt, which drops port 2's pin after the last bit, while this thread changes port 1's
  * pin as a task does. An interrupt between a task's read and write of LATF would put port 2's
@@ -15,7 +15,7 @@
 #include <pthread.h>
 #include <stdio.h>
 
-#include "../opt/tty.c"
+#include "../port/pic24/tty.c"
 
 volatile uint16_t fake_u1[5], fake_u2[5];
 volatile uint16_t LATF;

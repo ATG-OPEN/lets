@@ -8,10 +8,10 @@
  * one writer at each end.
  */
 
-#include "tty.h"
+#include "../../opt/tty.h"
 
-#include "../vfs/vfs.h"
-#include "../kernel/task.h"
+#include "../../vfs/vfs.h"
+#include "../../kernel/task.h"
 
 #include <xc.h>
 #include <stdio.h>

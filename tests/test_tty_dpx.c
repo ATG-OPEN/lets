@@ -85,7 +85,7 @@ int main(void)
 	srand(1);
 
 	/*
-	 * Two ports of one board, as opt/tty.c seeds them: tty_args_t a few dozen bytes apart,
+	 * Two ports of one board, as port/pic24/tty.c seeds them: tty_args_t a few dozen bytes apart,
 	 * ports 2 and 3, the us clock a little later for the second; started in the same ms or two.
 	 */
 	for (unsigned int k = 0; k < 2000; k++) {

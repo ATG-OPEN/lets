@@ -66,7 +66,7 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   themselves after 2-4 s (pseudo-random per port, `opt/tty_dpx.h`) of receiving nothing, `-a 0` off,
   `-stat` shows the swaps; `-DTTY_DPX_AUTO=0` builds it out: ~600 B code, 10 B RAM a port).
 - **Libraries** (`lib/`): `args` (argv, dotted paths such as `1.2.5`), `byte8` (framing + CRC16, up to
-  250 data bytes), `ddata`, `pidlib`, `queue`, `ema_filter`, `medianfilter`, `uuid`.
+  250 data bytes), `ddata`, `pidlib`, `queue`, `ema_filter`, `medianfilter` (the PIC24 device ID `uuid` is in `port/pic24`).
 - **Build flags:** `TASKS_MAX_COUNT` (16), `VFS_NODES_MAX` (24), `MAX_BLOCK_COUNT` (32 heap
   blocks), `VFS_NO_TFS`, `VFS_SYSTEM_STACK` (384 B, XC16), `SHELL_PASSWORD_DEFAULT`, `LETS_WDT` (0),
   `LETS_WDT_MS` (2000; PIC24 uses config bits), `LETS_WDT_DEFAULT_MS` (1000), `LETS_WDT_NO_TRAPS`.

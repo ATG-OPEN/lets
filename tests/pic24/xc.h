@@ -2,7 +2,7 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * The few PIC24 registers opt/tty.c uses, as plain memory, for a host test
+ * The few PIC24 registers port/pic24/tty.c uses, as plain memory, for a host test
  * (tests/test_tty.c): the test plays the UARTs. The CPU priority (IPL) is a
  * recursive lock: raised, it holds off the thread that plays the interrupts.
  */

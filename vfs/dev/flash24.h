@@ -60,13 +60,15 @@ typedef struct {
  */
 int flash24_init(flash24_t *f, uint32_t address);
 
-#if !defined(__XC16__)
-/** Host build: the instruction (24 bits) at program address @p addr. */
+/*
+ * The port's hooks, the flash itself: port/pic24/flash24.c on a PIC24FJ, the test's emulation
+ * on a PC (tests/test_vfs.c).
+ */
+/** The instruction (24 bits) at program address @p addr. */
 uint32_t flash24_hw_read(uint32_t addr);
-/** Host build: erases the page at @p addr; 0 or -1. */
+/** Erases the page at @p addr; 0 or -1. */
 int flash24_hw_erase(uint32_t addr);
-/** Host build: programs the double word at @p addr; 0 or -1. */
+/** Programs the double word at @p addr (and reads it back); 0 or -1. */
 int flash24_hw_program(uint32_t addr, uint32_t w0, uint32_t w1);
-#endif
 
 #endif /* VFS_FLASH24_H */

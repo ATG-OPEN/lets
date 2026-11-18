@@ -58,7 +58,7 @@ commands without it, so keep those off a link a stranger can reach.
 
 The kernel's `open`, `read`, `write`, `close`, `lseek`, `system`, `malloc` and `free` are placed
 in `.libc.*` sections, so XC16 links them instead of its own library versions. `reboot`
-(`bin/reboot.c`) uses the `reset` instruction.
+ends in `port_wdt_reset_now()`: the `reset` instruction.
 
 ## A PC (host build)
 
@@ -69,7 +69,10 @@ as a node, with non-blocking reads. See `examples/host/main.c` and the `Makefile
 
 ## Another MCU
 
-Nothing in `kernel/`, `vfs/` (but the memory drivers' `vfs_spi_t` and `flash24`) or `lib/` touches registers. Provide the clock, make sure your
+Nothing in `kernel/`, `vfs/`, `opt/` or `lib/` touches registers or includes a chip header: what
+does is in `port/<chip>/`, behind hooks (the clock, the watchdog and stack hooks of `task.h`, the
+memory drivers' `vfs_spi_t`, `flash24_hw_*()` of `vfs/dev/flash24.h`, the UART of `opt/tty.h`,
+`get_unique_id()` of `port/pic24/uuid.h`). Provide the clock, make sure your
 toolchain links the kernel's C-library functions (or rename them as the host build does), and
 write the board's device nodes.
 
@@ -91,7 +94,13 @@ hardware through four hooks (`kernel/task.h`):
 |-----------------------------------|------------------------------|------------------|--------------------|------------------|
 | PIC24 / dsPIC33 `port/pic24/wdt.c` | `RCONbits.SWDTEN = 1` (period: config bits) | `clrwdt` | `reset`     | RCON (then clears its flags) |
 | EFR32 `port/efr32/efr32.c`        | WDOG0 on the 1 kHz ULFRCO    | `WDOG0->CMD = CLEAR` unless syncing | `NVIC_SystemReset()` | EMU RSTCAUSE |
-| a PC (none)                       | the kernel's weak empty hooks: no watchdog, reason `-`; `port_wdt_reset_now()` calls `reboot_reset()` |||
+| a PC (none)                       | the kernel's weak empty hooks: no watchdog, reason `-`; `port_wdt_reset_now()` calls `exit(0)` |||
+
+`reboot()` (`task.h`, as Linux's reboot(2)) resets through `port_wdt_reset_now()`; it syncs
+nothing, the `reboot` command syncs first. The stack has three hooks of its own:
+`port_stack_init()` (marks it, at `task_initialize()`), `port_stack(&peak, &size)` (`top`) and
+`port_stack_left()` (`system()` refuses a command with less than `VFS_SYSTEM_STACK` left);
+PIC24 in `port/pic24/wdt.c` (`_SP_init` .. `SPLIM`), elsewhere weak ones that know nothing.
 
 **Every PIC24 / dsPIC33 project links `port/pic24/wdt.c`** (with LETS_WDT 0 too: the kick and
 the reset cause are there). The kernel has no weak PIC24 hooks, so a project without the file does
@@ -133,7 +142,7 @@ build is the one to check against. `top mem` shows what a board really uses.
 
 ## UART
 
-`opt/tty.c` is the UART of a PIC24F or dsPIC33E as a node, up to 6 ports (`-DTTY_PORTS=n`), sent and
+`port/pic24/tty.c` is the UART of a PIC24F or dsPIC33E as a node, up to 6 ports (`-DTTY_PORTS=n`), sent and
 received by interrupts, with the direction pin of RS485 driven from the interrupt: see `opt/tty.h`.
 It owns its UARTs, so when MCC runs again it must leave them out, or `uartN.c` comes back and defines
 the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`; keep the UARTs'

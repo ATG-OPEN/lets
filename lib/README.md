@@ -9,6 +9,5 @@
 | `queue` | `queue.h` | type-generic ring queue, declared by macro |
 | `ema_filter` | `ema_filter.h` | exponential moving average in integer arithmetic |
 | `medianfilter` | `medianfilter.h` | type-generic running median, declared by macro |
-| `uuid` | `uuid.h`, `uuid.c` | PIC24 / dsPIC33 unique device ID (XC16 only) |
 
-Except `uuid`, they build on a PC as well. Host tests: `make -C lib/test`.
+They all build on a PC as well (the PIC24 device ID is `port/pic24/uuid.c`). Host tests: `make -C lib/test`.

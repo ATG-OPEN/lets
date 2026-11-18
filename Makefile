@@ -64,10 +64,10 @@ build/test_tty_dpx: tests/test_tty_dpx.c opt/tty_dpx.h | build
 	$(CC) $(CFLAGS) $(SAN) tests/test_tty_dpx.c -o $@
 
 # the PIC24 tty on registers the test plays (tests/pic24/xc.h); a thread plays the interrupts
-build/test_tty: tests/test_tty.c tests/pic24/xc.h opt/tty.c opt/tty.h opt/tty_dpx.h | build
+build/test_tty: tests/test_tty.c tests/pic24/xc.h port/pic24/tty.c opt/tty.h opt/tty_dpx.h | build
 	$(CC) $(CFLAGS) $(SAN) -DTTY_PORTS=2 -Itests/pic24 tests/test_tty.c -lpthread -o $@
 
-LIBS    = $(filter-out lib/uuid.c opt/tty.c,$(wildcard lib/*.c) $(wildcard opt/*.c))
+LIBS    = $(wildcard lib/*.c) $(wildcard opt/*.c)
 
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done
@@ -81,7 +81,7 @@ test: build/test_kernel build/test_sleep build/test_wdt build/test_vfs build/as_
 	./build/test_nrf52
 	./build/test_tty
 	./build/test_tty_dpx
-	$(CC) $(CFLAGS) $(PRELUDE) -Werror -fsyntax-only -DTTY_PORTS=2 -DTTY_DPX_AUTO=0 -Itests/pic24 opt/tty.c
+	$(CC) $(CFLAGS) $(PRELUDE) -Werror -fsyntax-only -DTTY_PORTS=2 -DTTY_DPX_AUTO=0 -Itests/pic24 port/pic24/tty.c
 	$(MAKE) -C lib/test
 
 SOURCES = $(shell git ls-files '*.c' '*.h' 2>/dev/null)

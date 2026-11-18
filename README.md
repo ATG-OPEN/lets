@@ -73,8 +73,9 @@ same with file systems: try `ls /`, `ls -l /dev`, `cd /mnt/ee`, `echo hi > f`, `
 ## On the MCU
 
 Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/bin.c`,
-`lib/args.c` and `port/pic24/wdt.c` (the watchdog and reset-cause hooks; needed with or without
-`LETS_WDT`) to your MPLAB X project (XC16), plus any `opt/` node your board uses. Without
+`lib/args.c` and `port/pic24/wdt.c` (the watchdog, reset-cause and stack hooks; needed with or without
+`LETS_WDT`) to your MPLAB X project (XC16), plus any `opt/` node your board uses (the PIC24 UART
+`opt/tty.h` is `port/pic24/tty.c`; the device ID is `port/pic24/uuid.c`). Without
 tfs define `VFS_NO_TFS`; with it add `vfs/tfs.c`, `vfs/tfsvfs.c` and the memory drivers from
 `vfs/dev/`. Declare the heap once and boot:
 
@@ -157,11 +158,11 @@ See [docs/kernel.md](docs/kernel.md) (rules: tasks, memory, nodes, commands, sty
 |------|-|
 | `kernel/` | scheduler (`task`), heap (`alloc`) |
 | `bin/` | the shell and its kernel commands (`top`, `kill`, RAM files) |
-| `opt/` | optional nodes for a board: `gpa` (a GPIO pin, ADC or DAC channel as a node, in physical units), `tty` (a PIC24F UART that never makes a write wait, with an RS485 direction pin) |
+| `opt/` | optional nodes for a board: `gpa` (a GPIO pin, ADC or DAC channel as a node, in physical units), `tty` (`tty.h`: a UART that never makes a write wait, with an RS485 direction pin; the PIC24F one is `port/pic24/tty.c`) |
 | `vfs/` | the node table (`node`), the tree (`vfs`), the C-library calls (`posix`), the file commands (`bin`), the tiny file system (`tfs`), memory drivers (`dev/`: SPI EEPROM, SPI SRAM, SST25VF SPI flash, RAM disk, PIC24FJ flash, partitions) |
 | `argscript/` | the script language |
 | `lib/` | `args` (command-line parsing) and the portable libraries, see [lib/README.md](lib/README.md) |
-| `port/` | `pic24` (watchdog hooks), `efr32`, `nrf52`, `cortex-m`, `host` (the PC build) |
+| `port/` | everything that touches a chip: `pic24` (watchdog, reset and stack hooks `wdt.c`, UART `tty.c`, device ID `uuid.c`, program flash `flash24.c`), `efr32`, `nrf52`, `cortex-m`, `host` (the PC build) |
 | `examples/host/` | the PC demos (`main.c`, `vfs_main.c`) |
 | `tests/` | kernel and vfs host tests |
 
