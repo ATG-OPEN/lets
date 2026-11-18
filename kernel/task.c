@@ -14,17 +14,6 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#if defined(__XC16__)
-#include <xc.h>
-
-#define TASK_STACK_PATTERN 0x5AA5u
-
-extern char _SP_init; /* from the linker: the bottom of the stack */
-#endif
-
-/* the board's reset, in bin/reboot.c or its own */
-extern void reboot_reset(void) __attribute__((weak));
-
 #if LETS_WDT
 #define TASK_FAULT_MAGIC 0x4C57u
 #define TASK_NONE	 0xFFu /* no slot */
@@ -152,12 +141,8 @@ void task_initialize(uint64_t (*handle)(void))
 	task_wdt_late = false;
 #endif
 
-#if defined(__XC16__)
 	/* what is above the stack pointer now: task_stack() reads how far it was used */
-	for (uint16_t *p = (uint16_t *)WREG15 + 1; p < (uint16_t *)SPLIM; p++) {
-		*p = TASK_STACK_PATTERN;
-	}
-#endif
+	port_stack_init();
 
 	for (int i = 0; i < TASKS_MAX_COUNT; i++) {
 		task_t *t = &tasks[i];
@@ -312,25 +297,7 @@ float task_get_loop_time(void)
 
 int task_stack(size_t *peak, size_t *size)
 {
-#if defined(__XC16__)
-	uint16_t *start = (uint16_t *)&_SP_init;
-	uint16_t *end = (uint16_t *)SPLIM;
-	uint16_t *p = end;
-
-	while (p > start && p[-1] == TASK_STACK_PATTERN) {
-		p--;
-	}
-
-	*peak = (size_t)((char *)p - (char *)start);
-	*size = (size_t)((char *)end - (char *)start);
-
-	return 0;
-#else
-	(void)peak;
-	(void)size;
-
-	return -1;
-#endif
+	return port_stack(peak, size);
 }
 
 uint16_t task_reset_cause(void)
@@ -478,14 +445,10 @@ void __attribute__((weak)) port_wdt_kick(void)
 {
 }
 
+/* exit(): the port's _exit() resets the chip (Cortex-M); on a PC the process ends */
 void __attribute__((weak)) port_wdt_reset_now(void)
 {
-	if (reboot_reset != NULL) {
-		reboot_reset();
-	}
-
-	for (;;) {
-	}
+	exit(0);
 }
 
 task_reset_t __attribute__((weak)) port_wdt_reset_cause(uint16_t *raw)
@@ -494,7 +457,32 @@ task_reset_t __attribute__((weak)) port_wdt_reset_cause(uint16_t *raw)
 
 	return TASK_RESET_OTHER;
 }
+
+/* nothing known of the stack: top shows none, system() does not check */
+void __attribute__((weak)) port_stack_init(void)
+{
+}
+
+int __attribute__((weak)) port_stack(size_t *peak, size_t *size)
+{
+	(void)peak;
+	(void)size;
+
+	return -1;
+}
+
+size_t __attribute__((weak)) port_stack_left(void)
+{
+	return (size_t)-1;
+}
 #endif
+
+/* reboot(2): the reset, at once; whoever asks syncs first (the `reboot` command does) */
+int reboot(int cmd)
+{
+	(void)cmd;
+	port_wdt_reset_now();
+}
 
 void tasks_start(void)
 {

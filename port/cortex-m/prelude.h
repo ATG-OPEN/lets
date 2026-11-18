@@ -34,6 +34,7 @@
 #define printf k_printf
 #define malloc k_malloc
 #define free   k_free
+#define reboot k_reboot
 
 /* the kernel's heap has no calloc / realloc */
 #define calloc	k_calloc_is_not_in_the_kernel

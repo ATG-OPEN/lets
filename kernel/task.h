@@ -256,6 +256,24 @@ void port_wdt_reset_now(void) __attribute__((noreturn));
 /** Why the chip reset, and the raw register in @p raw (0 if none): once, at task_initialize(). */
 task_reset_t port_wdt_reset_cause(uint16_t *raw);
 
+/*
+ * The stack's port hooks: a port that knows its stack (PIC24: port/pic24/wdt.c) measures it;
+ * the kernel's weak ones (a PC, Cortex-M) know nothing.
+ */
+/** Marks the stack not used yet, for port_stack(); once, at task_initialize(). */
+void port_stack_init(void);
+/** The most stack used since port_stack_init() and the stack's size, in bytes: 0, or -1. */
+int port_stack(size_t *peak, size_t *size);
+/** Bytes of stack left now, below its limit: system() refuses a command with too few. */
+size_t port_stack_left(void);
+
+/**
+ * @brief Resets the board now, as Linux's reboot(2): nothing is synced, the caller syncs
+ * first (the `reboot` command: sync(), the ttys drain, sync(), reboot()). @p cmd is ignored
+ * (RB_AUTOBOOT). Through port_wdt_reset_now(); does not return.
+ */
+int reboot(int cmd) __attribute__((noreturn));
+
 /** @brief Runs the scheduler loop. Never returns. */
 void tasks_start(void);
 

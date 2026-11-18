@@ -217,9 +217,13 @@ static int held_sync(vfs_blk_t *blk)
 
 static vfs_blk_t held = {.size = 64, .sync = held_sync};
 
-void reboot_reset(void)
+static void finish(void) __attribute__((noreturn));
+
+/* the port's reset (reboot()): the test ends there */
+void port_wdt_reset_now(void)
 {
 	reset_at = now_us();
+	finish();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -853,12 +857,17 @@ static int checks(void *args, uint64_t t)
 			return 1;
 		}
 
-		CHECK(reset_at != 0 && reset_at - typed_at >= REBOOT_WAIT_MS * 1000u && syncs == 3);
-
-		fprintf(stderr, "kernel: %s\n", failures ? "FAILED" : "ok");
-		exit(failures != 0);
+		finish(); /* no reset: fails */
 	}
 	return 1;
+}
+
+static void finish(void)
+{
+	CHECK(reset_at != 0 && reset_at - typed_at >= REBOOT_WAIT_MS * 1000u && syncs == 3);
+
+	fprintf(stderr, "kernel: %s\n", failures ? "FAILED" : "ok");
+	exit(failures != 0);
 }
 
 int main(void)

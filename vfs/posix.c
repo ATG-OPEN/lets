@@ -23,10 +23,6 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#if defined(__XC16__)
-#include <xc.h> /* SPLIM: the end of the stack */
-#endif
-
 /* -------------------------------------------------------------------------- */
 
 #define POSIX_STDOUT_SIZE 128u /* stdout line buffer */
@@ -427,14 +423,10 @@ int __attribute__((__section__(".libc.system"))) system(const char *input)
 	/*
 	 * A command run from inside a command, and so on, would end in a stack overflow (a reset on
 	 * a PIC24): with less than VFS_SYSTEM_STACK left it is refused, while there is still stack
-	 * for the message. The stack grows up to SPLIM.
+	 * for the message. The port knows the stack (port_stack_left()).
 	 */
 #if VFS_SYSTEM_STACK > 0
-	uint16_t sp;
-
-	__asm__ volatile("mov w15, %0" : "=r"(sp));
-
-	if (sp + VFS_SYSTEM_STACK > SPLIM) {
+	if (port_stack_left() < VFS_SYSTEM_STACK) {
 		printf("too deep\n");
 		return -1;
 	}

@@ -31,6 +31,7 @@
 #define printf k_printf
 #define malloc k_malloc
 #define free   k_free
+#define reboot k_reboot
 
 /* the kernel's heap has no calloc / realloc (XC16's would use the linker heap, 0 bytes, and
  * return NULL): on a PC too they fail, at link time */

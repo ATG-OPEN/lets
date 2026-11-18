@@ -53,7 +53,7 @@ static uint64_t last_kick;
 static unsigned long kicks;
 static task_reset_t cause = TASK_RESET_POWER_ON;
 
-static void reset(task_reset_t why, int boot)
+static __attribute__((noreturn)) void reset(task_reset_t why, int boot)
 {
 	cause = why;
 	wdt_ms = 0;
@@ -92,7 +92,7 @@ task_reset_t port_wdt_reset_cause(uint16_t *raw)
 }
 
 /* task_trap() resets through here */
-void reboot_reset(void)
+void port_wdt_reset_now(void)
 {
 	reset(TASK_RESET_SOFTWARE, boot + 1);
 }

@@ -7,24 +7,20 @@
 #include "../kernel/task.h"
 #include "../vfs/vfs.h"
 
-#include <stdlib.h>
+#include <stdbool.h>
 
-void __attribute__((weak)) reboot_reset(void)
-{
-#if defined(__XC16__)
-	__asm__ volatile("reset");
-#else
-	exit(0);
-#endif
-}
+static bool reboot_due; /* the task has waited: the queues have drained */
 
-/* the queues have drained: what came meanwhile is written too, then the reset */
+/* first a sleep for the queues to drain; then what came meanwhile is written too, and the reset */
 static int reboot_task(void *arg, uint64_t now)
 {
-	vfs_sync();
-	reboot_reset();
+	if (!reboot_due) {
+		reboot_due = true;
+		return REBOOT_WAIT_MS;
+	}
 
-	return -1;
+	vfs_sync();
+	reboot(0);
 }
 
 int reboot_execute(void *args, int argc, char *argv[])
@@ -35,12 +31,10 @@ int reboot_execute(void *args, int argc, char *argv[])
 
 	/* no room for the task: no wait either */
 	if (t == NULL) {
+		reboot_due = true;
 		reboot_task(NULL, 0);
-		return 0;
 	}
 
-	t->state = TASK_SLEEPING;
-	t->wake_tick = (uint32_t)task_get_system_time() + REBOOT_WAIT_MS * 1000ul;
 	shell_wait(t);
 
 	return 0;
