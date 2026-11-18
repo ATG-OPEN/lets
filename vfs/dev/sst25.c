@@ -3,6 +3,8 @@
 
 #include "sst25.h"
 
+#include "../../kernel/task.h"
+
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
@@ -82,6 +84,7 @@ static int sst25_read(vfs_blk_t *blk, uint32_t addr, void *buffer, unsigned int 
 
 static int sst25_erase(sst25_t *sf, uint32_t addr)
 {
+	task_busy(); /* a long write erases sector after sector in one call */
 	sst25_simple(sf, SST25_WREN);
 	sst25_command(sf, SST25_ERASE, addr);
 	sf->spi->select(false);

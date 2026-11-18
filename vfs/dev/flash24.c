@@ -3,6 +3,8 @@
 
 #include "flash24.h"
 
+#include "../../kernel/task.h"
+
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -154,6 +156,9 @@ static int flash24_copy(flash24_t *f, uint32_t addr, const uint8_t *p, unsigned 
 {
 	uint8_t other = (uint8_t)(f->live ^ 1u);
 	uint32_t to = flash24_page(f, other);
+
+	/* ~50 ms a copy, and a file rewrite can take ~80 of them in one call */
+	task_busy();
 
 	if (flash24_hw_erase(to) < 0) {
 		return -1;

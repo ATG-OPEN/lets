@@ -114,7 +114,8 @@ watchdog on; `FWDTEN = OFF` also locks `SWDTEN` out:
 #pragma config WDTPS = PS512        // ... x 512: about 2.1 s (PS1024: 4.2 s)
 ```
 
-The period must be longer than the slowest call of any task (a flash erase, say), and longer than
+The period must be longer than the slowest step of any task (one flash erase, say: a driver that
+erases page after page in one call calls `task_busy()` before each, which kicks), and longer than
 `LETS_WDT_DEFAULT_MS` (1000), so a task kept waiting is named before the hardware resets. Other
 families name the bits differently: see the device's config-bit list in the XC16 docs.
 

@@ -56,6 +56,8 @@ static task_fault_t task_fault_last; /* what it held at start-up */
 static bool task_wdt_late;	     /* a watched task was late: no more kicks */
 static uint8_t task_hog = TASK_NONE; /* the longest call since the last check ... */
 static uint32_t task_hog_us;	     /* ... and how long it took */
+static uint32_t task_call_start;     /* when the running task's call began */
+static bool task_call_busy;	     /* it called task_busy() */
 #else
 static task_t tasks[TASKS_MAX_COUNT];
 #endif
@@ -385,7 +387,8 @@ static bool task_wdt_check(uint32_t now)
 				continue; /* asleep: not waiting for anything */
 			}
 
-			since = t->wake_tick;
+			/* ready since its wake, or since a busy call kept it waiting */
+			since = ((int32_t)(t->alive - t->wake_tick) > 0) ? t->alive : t->wake_tick;
 		}
 
 		if (now - since > (uint32_t)(t->deadline & ~TASK_WATCH_ALIVE) * 1000u) {
@@ -431,6 +434,23 @@ void task_alive(void)
 		tasks[current].alive = (uint32_t)task_get_system_time();
 	}
 #endif
+}
+
+void task_busy(void)
+{
+#if LETS_WDT
+	if (current >= 0 && current < (int)TASKS_MAX_COUNT) {
+		uint32_t now = (uint32_t)task_get_system_time();
+
+		if (task_wdt_late || now - task_call_start > LETS_WDT_BUSY_MS * 1000ul) {
+			return; /* late already, or far too long: a hang, let the watchdog fire */
+		}
+
+		tasks[current].alive = now;
+		task_call_busy = true;
+	}
+#endif
+	port_wdt_kick();
 }
 
 void task_trap(uint16_t code)
@@ -535,6 +555,8 @@ void tasks_start(void)
 
 #if LETS_WDT
 			task_wdt.run = (uint8_t)current; /* names it if it never returns */
+			task_call_start = start;
+			task_call_busy = false;
 #endif
 			int r = t->entry(t->arg, now);
 
@@ -552,6 +574,13 @@ void tasks_start(void)
 
 			if (!(t->deadline & TASK_WATCH_ALIVE)) {
 				t->alive = end; /* ready again from now, if it does not sleep */
+			}
+
+			if (task_call_busy) {
+				/* a long call that kept the watchdog quiet: the others wait from now */
+				for (int i = 0; i < TASKS_MAX_COUNT; i++) {
+					tasks[i].alive = end;
+				}
 			}
 #endif
 

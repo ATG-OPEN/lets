@@ -16,6 +16,7 @@
 
 void nrf52_flash_erase(uint32_t addr)
 {
+	task_busy(); /* ~85 ms: a long write erases page after page in one call */
 	NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Een;
 	while (!NRF_NVMC->READY) {
 	}

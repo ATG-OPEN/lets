@@ -44,7 +44,9 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   `LETS_WDT_DEFAULT_MS` (1000), sleeping never counts -> `late: T, by: LONGEST_CALL`; a call that
   never returns -> hardware reset, `hang: T` (running slot + task table in no-init RAM).
   `task_watch(t|NULL, ms)` = must also call `task_alive()` within ms (1..32767, sleeps count),
-  `task_watch(t, 0)` = not watched at all. `task_trap(code)`; after a reset `task_reset_reason()`
+  `task_watch(t, 0)` = not watched at all. `task_busy()` = one long call making progress (flash
+  drivers call it before every erase: flash24, sst25, EFR32, nRF52): kicks + checks in, the others
+  wait from the call's end; more than `LETS_WDT_BUSY_MS` (30 s) of it = hang. `task_trap(code)`; after a reset `task_reset_reason()`
   and `task_fault()` (kind LATE/HANG/TRAP, task, by, code), shown by `top` and `top mem`.
   Port hooks (all logic in `task.c`): `port_wdt_start(ms)`, `port_wdt_kick()` (every loop, also
   LETS_WDT 0), `port_wdt_reset_now()`, `port_wdt_reset_cause(&raw)`: PIC24 `port/pic24/wdt.c`

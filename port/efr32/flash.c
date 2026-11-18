@@ -67,6 +67,7 @@ int efr32_flash_erase(uint32_t addr)
 {
 	uint32_t primask = __get_PRIMASK();
 
+	task_busy(); /* a long write erases page after page in one call */
 	__disable_irq();
 	int r = erase_page(addr & ~(EFR32_FLASH_PAGE - 1u));
 	__set_PRIMASK(primask);

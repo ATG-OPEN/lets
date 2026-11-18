@@ -51,6 +51,9 @@
 #ifndef LETS_WDT_DEFAULT_MS
 #define LETS_WDT_DEFAULT_MS 1000u /**< How long a ready task may wait for its turn (task_watch()). */
 #endif
+#ifndef LETS_WDT_BUSY_MS
+#define LETS_WDT_BUSY_MS 30000u /**< The longest call task_busy() may keep the watchdog quiet for. */
+#endif
 #define TASK_WATCH_ALIVE 0x8000u /**< In task_t.deadline: the task checks in with task_alive(). */
 
 /** State of a slot in the task table. */
@@ -220,6 +223,18 @@ int task_watch(task_t *t, uint16_t deadline_ms);
 
 /** @brief The running task checks in: it is alive and making progress (see task_watch()). */
 void task_alive(void);
+
+/**
+ * @brief The running task is in one long call that is making progress: kick the watchdog now.
+ *
+ * For work that cannot return to the scheduler in between, such as a flash driver copying
+ * page after page (a /boot rewrite): call it between steps that each take well under the
+ * hardware period. It kicks the watchdog (port_wdt_kick(), with LETS_WDT 0 too) and checks
+ * the task in (task_alive()). The other tasks, kept waiting by such a call, wait from its end:
+ * none of them is late because of it. A call longer than LETS_WDT_BUSY_MS is taken for a
+ * hang: task_busy() stops kicking, and the reset says `watchdog (hang: TASK)`.
+ */
+void task_busy(void);
 
 /**
  * @brief Records a CPU trap with the running task and resets the chip (port_wdt_reset_now()).

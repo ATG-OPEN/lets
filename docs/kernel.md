@@ -89,6 +89,12 @@ static int link_task(void *args, uint64_t now)
   The deadline (1 to 32767 ms) counts the task's sleep too: make it longer than its longest
   sleep. Late: `reset watchdog (late: link)`.
 - `task_watch(t, 0)` takes a task out altogether: one allowed to wait for its turn.
+- **One long call that makes progress** (a flash driver copying page after page: an `ed` rewrite
+  of `/boot/rc` on a PIC24 is ~80 page copies, ~4 s, in one call) calls `task_busy()` between
+  steps: it kicks the watchdog (`port_wdt_kick()`) and checks the task in, and the tasks it kept
+  waiting wait from the end of the call, so none of them is late. The memory drivers do it before
+  every erase (`flash24`, `sst25`, the EFR32 and nRF52 flash). A call that keeps calling it for
+  longer than `LETS_WDT_BUSY_MS` (30000) is a hang: the kicks stop, `reset watchdog (hang: ed)`.
 
 The kernel stamps every task when `tasks_start()` begins, so a slow boot (`/boot/rc`) is not late.
 

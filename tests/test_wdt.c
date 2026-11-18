@@ -15,7 +15,11 @@
  *           ready, wait longer than LETS_WDT_DEFAULT_MS
  *   boot 3  watchdog, late: victim, by: hog; "spinner" never returns
  *   boot 4  watchdog, hang: spinner; the next reset has no fault
- *   boot 5  overhead: one pass with 15 tasks that check in against 15 not watched
+ *   boot 5  "writer" takes 5 s in one call but calls task_busy() every 50 ms (a flash
+ *           rewrite): no reset, and the others it kept waiting are not late; then it calls
+ *           task_busy() for ever
+ *   boot 6  watchdog, hang: writer (after LETS_WDT_BUSY_MS)
+ *   boot 7  overhead: one pass with 15 tasks that check in against 15 not watched
  */
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
@@ -185,7 +189,46 @@ static int spinner(void *arg, uint64_t now)
 	return 0;
 }
 
-/* ---- boot 3 --------------------------------------------------------------------------- */
+/* ---- boot 5 --------------------------------------------------------------------------- */
+
+static int wrote; /* 1: the 5 s call is over, 2: the others ran after it, no reset */
+
+static void busy_for(uint64_t us)
+{
+	uint64_t from = task_get_system_time();
+	uint64_t step = from;
+
+	while (task_get_system_time() - from < us) {
+		if (task_get_system_time() - step >= 50000u) {
+			step = task_get_system_time();
+			task_busy(); /* a page done */
+		}
+	}
+}
+
+static int writer(void *arg, uint64_t now)
+{
+	if (now > 1000000u && wrote == 0) {
+		busy_for(5000000u); /* longer than the watchdog, and than any deadline */
+		wrote = 1;
+	} else if (wrote == 2) {
+		busy_for(UINT64_MAX); /* never done: a hang, though it keeps calling task_busy() */
+	}
+
+	return 10;
+}
+
+static int after(void *arg, uint64_t now)
+{
+	if (wrote == 1 && now > 7000000u) {
+		wrote = 2;
+	}
+
+	task_alive();
+	return 10;
+}
+
+/* ---- boot 7 --------------------------------------------------------------------------- */
 
 static int spin(void *arg, uint64_t now)
 {
@@ -311,6 +354,25 @@ int main(void)
 		CHECK(f != NULL && f->kind == TASK_FAULT_HANG && strcmp(f->task, "spinner") == 0 &&
 		      f->by[0] == '\0');
 		reset(TASK_RESET_PIN, 5);
+		break;
+
+	case 5:
+		CHECK(task_reset_reason() == TASK_RESET_PIN && f == NULL);
+		fake_us = 0;
+		wrote = 0;
+		task_create("victim", victim, NULL);
+		task_create("nap", nap, NULL);
+		task_watch(task_create("after", after, NULL), 100);
+		task_create("writer", writer, NULL);
+		break;
+
+	case 6:
+		fprintf(stderr, "wdt: busy writer: hang at %.3f s\n", fake_us / 1e6);
+		CHECK(wrote == 2);
+		CHECK(task_reset_reason() == TASK_RESET_WATCHDOG);
+		CHECK(f != NULL && f->kind == TASK_FAULT_HANG && strcmp(f->task, "writer") == 0);
+		CHECK(fake_us > 7000000u + LETS_WDT_BUSY_MS * 1000ull);
+		reset(TASK_RESET_PIN, 7);
 		break;
 
 	default:
