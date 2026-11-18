@@ -4,7 +4,6 @@
 #include "pidlib.h"
 
 #include <math.h>
-#include <float.h>
 #include <unistd.h>
 
 void pidlib_initialize(pid_calc_t *p)

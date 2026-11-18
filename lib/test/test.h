@@ -11,7 +11,6 @@
 #define LIB_TEST_H
 
 #include <stdio.h>
-#include <stdlib.h>
 
 static int test_failures;
 

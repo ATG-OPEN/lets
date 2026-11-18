@@ -8,7 +8,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <stddef.h>
-#include <stdio.h>
 
 /* one byte into a CRC-16/MODBUS */
 static uint16_t byte8_crc16_update(uint16_t crc, uint8_t data)
