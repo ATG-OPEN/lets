@@ -8,8 +8,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
 
 #define DATE_TEXT 20u		/* "YYYY-MM-DD hh:mm:ss" and its 0 */
 #define DATE_DAY  86400ul	/* seconds */

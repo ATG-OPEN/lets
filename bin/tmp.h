@@ -6,8 +6,6 @@
 
 #include "../vfs/vfs.h"
 
-#include <stdint.h>
-
 /**
  * @brief Creates a RAM file (126 bytes) named @p name, as it is stored in the table.
  * @return Its node, or -1 when the heap or the node table is full.

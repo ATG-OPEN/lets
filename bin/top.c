@@ -18,7 +18,6 @@
 #include "../kernel/alloc.h"
 #include "../vfs/vfs.h"
 
-#include <unistd.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>

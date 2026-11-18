@@ -5,10 +5,8 @@
 
 #include "../kernel/task.h"
 
-#include <unistd.h>
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 
 int kill(void *args, int argc, char *argv[])
 {
