@@ -16,7 +16,6 @@
 #include <errno.h>
 #include <stddef.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 efr32_tty_t *efr32_console;
 

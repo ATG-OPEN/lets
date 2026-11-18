@@ -16,7 +16,6 @@
 #include <errno.h>
 #include <stddef.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 nrf52_tty_t *nrf52_console;
 
