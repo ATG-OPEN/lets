@@ -228,7 +228,7 @@ static int bin_cd(void *args, int argc, char *argv[])
 	}
 
 	/* no argument: home, as on Linux */
-	if (vfs_chdir(argc == 2 ? argv[1] : VFS_HOME) < 0 && (argc == 2 || vfs_chdir("/") < 0)) {
+	if (chdir(argc == 2 ? argv[1] : VFS_HOME) < 0 && (argc == 2 || chdir("/") < 0)) {
 		printf("not found\n");
 		return -1;
 	}
@@ -240,7 +240,7 @@ static int bin_pwd(void *args, int argc, char *argv[])
 {
 	char path[VFS_PATH_MAX];
 
-	if (vfs_dir_path(vfs_cwd(), path, sizeof(path)) < 0) {
+	if (getcwd(path, sizeof(path)) == NULL) {
 		return -1;
 	}
 
@@ -252,7 +252,9 @@ static int bin_pwd(void *args, int argc, char *argv[])
 /* what the block devices hold back to the memory now */
 static int bin_sync(void *args, int argc, char *argv[])
 {
-	return vfs_sync();
+	sync();
+
+	return 0;
 }
 
 static int bin_mkdir(void *args, int argc, char *argv[])
@@ -261,7 +263,7 @@ static int bin_mkdir(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	return vfs_mkdir(argv[1]) < 0 ? bin_bad() : 0;
+	return mkdir(argv[1], 0) < 0 ? bin_bad() : 0;
 }
 
 static int bin_rm(void *args, int argc, char *argv[])
@@ -278,7 +280,7 @@ static int bin_rm(void *args, int argc, char *argv[])
 	}
 
 	/* devices, commands and mount points stay; a directory must be empty */
-	if (vfs_remove(argv[1]) < 0) {
+	if (remove(argv[1]) < 0) {
 		printf(p.kind == VFS_DIR ? "not empty\n" : "busy or not a file\n");
 		return -1;
 	}
@@ -292,7 +294,7 @@ static int bin_mv(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	return vfs_rename(argv[1], argv[2]) < 0 ? bin_bad() : 0;
+	return rename(argv[1], argv[2]) < 0 ? bin_bad() : 0;
 }
 
 /* touch path: an empty file, or a RAM file outside a mounted file system */
@@ -593,7 +595,7 @@ static int bin_df(void *args, int argc, char *argv[])
 static int bin_mount(void *args, int argc, char *argv[])
 {
 	const char *type = "tfs";
-	bool format = false;
+	unsigned long flags = 0;
 	int i = 1;
 
 	if (argc == 1) {
@@ -602,7 +604,7 @@ static int bin_mount(void *args, int argc, char *argv[])
 
 	for (; i < argc && argv[i][0] == '-'; i++) {
 		if (strcmp(argv[i], "-f") == 0) {
-			format = true;
+			flags = MS_FORMAT;
 		} else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
 			type = argv[++i];
 		} else {
@@ -615,7 +617,7 @@ static int bin_mount(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-	if (vfs_mount_type(type, argv[i], argv[i + 1], format) < 0) {
+	if (mount(argv[i], argv[i + 1], type, flags, NULL) < 0) {
 		printf("mount failed\n");
 		return -1;
 	}
@@ -629,7 +631,7 @@ static int bin_umount(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	if (vfs_umount(argv[1]) < 0) {
+	if (umount(argv[1]) < 0) {
 		printf("umount failed\n");
 		return -1;
 	}
@@ -706,7 +708,7 @@ static void bin_prompt(void)
 	size_t home = strlen(VFS_HOME);
 	const char *shown = path;
 
-	if (vfs_dir_path(vfs_cwd(), path, sizeof(path)) < 0) {
+	if (getcwd(path, sizeof(path)) == NULL) {
 		strcpy(path, "?");
 	}
 

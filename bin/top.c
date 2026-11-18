@@ -298,7 +298,7 @@ static bool top_make(top_t *s)
 	}
 
 	/* the line end: a terminal needs "\r\n" */
-	if (vfs_terminal()) {
+	if (isatty(1)) {
 		s->line[l.n++] = '\r';
 	}
 
@@ -311,7 +311,6 @@ static bool top_make(top_t *s)
 static int top_task(void *args, uint64_t system_time)
 {
 	top_t *s = args;
-	int out = vfs_stream(1);
 
 	(void)system_time;
 
@@ -320,7 +319,8 @@ static int top_task(void *args, uint64_t system_time)
 		return -1; /* all written */
 	}
 
-	int n = vfs_fd_write(out, s->line, s->length);
+	/* stderr: where stdout goes, unbuffered, and it says how much the stream took */
+	int n = write(2, s->line, s->length);
 
 	if (n < 0) {
 		return -1; /* the console is gone */
@@ -387,7 +387,7 @@ int top(void *args, int argc, char *argv[])
 	memset(s, 0, sizeof(top_t));
 
 	/* what the shell has in stdout goes first */
-	vfs_stdout_flush();
+	fsync(1);
 
 	task_t *t = task_create("top", top_task, s);
 

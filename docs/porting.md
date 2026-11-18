@@ -57,7 +57,9 @@ commands without it, so keep those off a link a stranger can reach.
 ## XC16
 
 The kernel's `open`, `read`, `write`, `close`, `lseek`, `system`, `malloc` and `free` are placed
-in `.libc.*` sections, so XC16 links them instead of its own library versions. `reboot`
+in `.libc.*` sections, so XC16 links them instead of its own library versions. The other POSIX
+calls of `lib/posix.h` are not in XC16's library at all; its headers do not declare most of them,
+so `lib/posix.h` does. `reboot`
 ends in `port_wdt_reset_now()`: the `reset` instruction.
 
 ## A PC (host build)

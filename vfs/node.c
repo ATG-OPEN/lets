@@ -60,11 +60,12 @@ int vfs_console(void)
 	return vfs_std_fd;
 }
 
-bool vfs_terminal(void)
+/* the running task's streams (0, 1, 2) are a terminal: its own setting, else the console's */
+int isatty(int fd)
 {
 	int8_t terminal = task_streams()->terminal;
 
-	return (terminal >= 0) ? (terminal != 0) : vfs_std_terminal;
+	return (unsigned int)fd <= 2u && ((terminal >= 0) ? (terminal != 0) : vfs_std_terminal);
 }
 
 int vfs_std_execute(void *args, int argc, char *argv[])

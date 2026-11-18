@@ -32,6 +32,16 @@
 #define malloc k_malloc
 #define free   k_free
 #define reboot k_reboot
+#define chdir  k_chdir
+#define getcwd k_getcwd
+#define mkdir  k_mkdir
+#define rename k_rename
+#define remove k_remove
+#define mount  k_mount
+#define umount k_umount
+#define sync   k_sync
+#define fsync  k_fsync
+#define isatty k_isatty
 
 /* the kernel's heap has no calloc / realloc (XC16's would use the linker heap, 0 bytes, and
  * return NULL): on a PC too they fail, at link time */

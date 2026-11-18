@@ -291,7 +291,7 @@ static void shell_done(void)
 {
 	if (shell->done && !shell_waiting() && !task_stopping()) {
 		shell->done = false;
-		vfs_stdout_flush();
+		fsync(1);
 		shell_prompt_print();
 		shell_flush();
 	}
@@ -723,7 +723,7 @@ static inline __attribute__((always_inline)) int shell_poll(void *args)
 	/* as a login: rc's `cd` is rc's own */
 	if (!shell->started) {
 		shell->started = true;
-		vfs_chdir(VFS_HOME);
+		chdir(VFS_HOME);
 	}
 
 	/*
@@ -732,7 +732,7 @@ static inline __attribute__((always_inline)) int shell_poll(void *args)
 	 */
 	if (shell_waiting()) {
 #ifndef SHELL_NO_TERMINAL
-		if (vfs_terminal()) {
+		if (isatty(0)) {
 			char keys[8];
 			int size = read(0, keys, sizeof(keys));
 
@@ -746,11 +746,11 @@ static inline __attribute__((always_inline)) int shell_poll(void *args)
 	}
 
 	/* a link: the prompt of a line whose task has ended; then the lines left behind by the wait */
-	if (!vfs_terminal()) {
+	if (!isatty(0)) {
 		shell_done();
 	}
 
-	if (!vfs_terminal() && shell->length > 0) {
+	if (!isatty(0) && shell->length > 0) {
 		shell_lines(false);
 
 		if (shell_waiting()) {
@@ -759,7 +759,7 @@ static inline __attribute__((always_inline)) int shell_poll(void *args)
 	}
 
 #ifndef SHELL_NO_TERMINAL
-	if (vfs_terminal()) {
+	if (isatty(0)) {
 		char keys[16];
 
 		if (!shell->prompted) {
@@ -797,7 +797,7 @@ static inline __attribute__((always_inline)) int shell_poll(void *args)
 			}
 #endif
 
-			if (!shell->prompted && vfs_terminal() && !task_stopping()) {
+			if (!shell->prompted && isatty(0) && !task_stopping()) {
 				shell_prompt(); /* the command is done: the next line */
 			}
 		}

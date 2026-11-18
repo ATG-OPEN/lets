@@ -19,13 +19,13 @@ static int reboot_task(void *arg, uint64_t now)
 		return REBOOT_WAIT_MS;
 	}
 
-	vfs_sync();
+	sync();
 	reboot(0);
 }
 
 int reboot_execute(void *args, int argc, char *argv[])
 {
-	vfs_sync();
+	sync();
 
 	task_t *t = task_create("reboot", reboot_task, NULL);
 

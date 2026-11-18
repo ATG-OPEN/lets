@@ -152,6 +152,25 @@ int __attribute__((__section__(".libc.read"))) read(int handle, void *buffer, un
 	return vfs_fd_read(vfs_stream(handle), buffer, len);
 }
 
+/* the line stdout holds goes on now (whichever stream it is for: it would go first anyway) */
+int fsync(int fd)
+{
+	(void)fd;
+	vfs_stdout_flush();
+
+	return 0;
+}
+
+void sync(void)
+{
+	vfs_sync();
+}
+
+char *getcwd(char *buffer, size_t size)
+{
+	return (vfs_dir_path(vfs_cwd(), buffer, (unsigned int)size) < 0) ? NULL : buffer;
+}
+
 /* files: the full 32-bit position (a node's lseek handler returns an int) */
 off_t __attribute__((__section__(".libc.lseek"))) lseek(int handle, off_t offset, int whence)
 {

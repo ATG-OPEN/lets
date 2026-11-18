@@ -190,6 +190,21 @@ nothing          ->  not found\n/tmp$
 For loops, conditions, variables and background scripts, see
 `docs/argscript.md`. Every startup script is also a valid argscript.
 
+## Programs
+
+A program on LETS - a command in `bin/`, a script, a board's application - uses the C library
+and the POSIX calls the kernel and the vfs provide underneath, as on Linux: `open`, `read`,
+`write`, `close`, `lseek`, `system`, `malloc`, `free`, and from `lib/posix.h` `chdir`,
+`getcwd`, `mkdir`, `remove`, `rename`, `mount`, `umount`, `sync`, `fsync`, `isatty`, with
+`reboot()` in `kernel/task.h`. stdout (1) is line buffered and stderr (2) is the same stream
+unbuffered: a write to 2 says how much a full stream took (0: nothing now, try later), which is
+how `lines.h` and `top` never lose a line on a packet port; `fsync(1)` passes on stdout's line
+first. `isatty(0)` is the terminal mode (`std -t`, `shell -t`): a line ends in "\r\n" there.
+
+The commands of `bin/` are programs in this sense; the command table `vfs_commands` is theirs
+(`bin/bin.c`), and `system()` underneath finds a name in it. The old `vfs_*` names of these calls
+(`vfs_chdir`, `vfs_mkdir`, ...) remain as macros for code written before.
+
 ## Style
 
 The code follows the [Linux kernel coding style](https://www.kernel.org/doc/html/latest/process/coding-style.html),

@@ -377,7 +377,7 @@ uint8_t vfs_cwd(void)
 	return task_streams()->cwd;
 }
 
-int vfs_chdir(const char *path)
+int chdir(const char *path)
 {
 	vfs_path_t p;
 
@@ -525,9 +525,11 @@ int vfs_register_app(const char *path, int (*execute_handler)(void *args, int ar
 			       &vfs_app_handlers) < 0 ? -1 : 0;
 }
 
-int vfs_mkdir(const char *path)
+int mkdir(const char *path, mode_t mode)
 {
 	vfs_path_t p;
+
+	(void)mode;
 
 	if (vfs_resolve(path, &p) < 0 || p.kind != VFS_NONE) {
 		return -1;
@@ -536,7 +538,7 @@ int vfs_mkdir(const char *path)
 	return vfs_dir_add(p.dir, p.name) < 0 ? -1 : 0;
 }
 
-int vfs_remove(const char *path)
+int remove(const char *path)
 {
 	vfs_path_t p;
 
@@ -585,7 +587,7 @@ int vfs_remove(const char *path)
 	return -1;
 }
 
-int vfs_rename(const char *from, const char *to)
+int rename(const char *from, const char *to)
 {
 	vfs_path_t a, b;
 
@@ -1127,8 +1129,11 @@ void *vfs_mount_get(uint8_t dir, const vfs_fs_type_t **type)
 	return d->fs;
 }
 
-int vfs_mount_type(const char *type, const char *source, const char *path, bool format)
+int mount(const char *source, const char *path, const char *type, unsigned long flags,
+	  const void *data)
 {
+	(void)data;
+
 	vfs_fs_type_t *t = vfs_types;
 	vfs_path_t p;
 	int d = -1;
@@ -1169,7 +1174,7 @@ int vfs_mount_type(const char *type, const char *source, const char *path, bool 
 		return -1;
 	}
 
-	void *fs = t->mount(source, format);
+	void *fs = t->mount(source, (flags & MS_FORMAT) != 0);
 
 	if (fs == NULL) {
 		if (created) {
@@ -1185,7 +1190,7 @@ int vfs_mount_type(const char *type, const char *source, const char *path, bool 
 	return 0;
 }
 
-int vfs_umount(const char *path)
+int umount(const char *path)
 {
 	vfs_path_t p;
 

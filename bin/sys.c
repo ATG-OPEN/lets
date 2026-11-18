@@ -37,7 +37,7 @@ static int sys_run(void *args, uint64_t system_time)
 	s->terminal = 0;
 
 	system(sys_line);
-	vfs_stdout_flush();
+	fsync(1);
 
 	return -1;
 }

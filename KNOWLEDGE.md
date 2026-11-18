@@ -54,7 +54,12 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
 - **Nodes** (`vfs/vfs.h`): `vfs_node_create(name, hidden, args, &handlers)`,
   `vfs_register_app("/opt/name", execute)`, `vfs_blk_register()`; `vfs_peer_new()` - a driver
   signals a new peer on an input (the shell then asks its password again).
-- **C library from vfs:** `open`, `read`, `write`, `close`, `lseek`, `system`, `malloc`, `free`.
+- **C library from vfs:** `open`, `read`, `write`, `close`, `lseek`, `system`, `malloc`, `free`;
+  the POSIX line (`lib/posix.h`, programs include no kernel/vfs header for these): `chdir`,
+  `getcwd`, `mkdir`, `remove`, `rename`, `mount` (`MS_FORMAT`), `umount`, `sync`, `fsync`
+  (stdout's line), `isatty` (terminal mode), `reboot` (kernel/task.h). Old names stay as macros
+  (`vfs_chdir`, `vfs_mkdir`, `vfs_remove`, `vfs_rename`, `vfs_mount_type`, `vfs_umount`,
+  `vfs_terminal`).
 - **Shell:** `std [-t] NODE` moves the shell (terminal or link mode), `;` separates commands,
   redirection `<` `>`; commands `ls cd cat echo top kill mv touch rm cp mount df date uptime passwd
   reboot ...`; password asked once per input stream, again after `vfs_peer_new()`; default

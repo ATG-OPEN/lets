@@ -47,7 +47,7 @@ static int lines_step(lines_t *l)
 		n = (n > LINES_SIZE) ? LINES_SIZE : n;
 
 		/* a terminal needs "\r\n" to start a line */
-		if (l->piece[n - 1] == '\n' && vfs_terminal()) {
+		if (l->piece[n - 1] == '\n' && isatty(1)) {
 			l->piece[n - 1] = '\r';
 			l->piece[n++] = '\n';
 		}
@@ -56,18 +56,16 @@ static int lines_step(lines_t *l)
 		l->at = 0;
 	}
 
-	int n;
+	/* stderr: where stdout goes, unbuffered, and it says how much the stream took */
+	int n = write(2, l->piece + l->at, (unsigned int)(l->length - l->at));
 
 #if !defined(__XC16__)
-	/* a PC's printf() is not ours: without a stream of the task's own it goes to the PC's stdout */
-	if (task_streams()->out < 0) {
+	/* a PC's printf() is not ours: with no stream at all it goes to the PC's stdout */
+	if (n < 0) {
 		n = printf("%.*s", (int)(l->length - l->at), l->piece + l->at);
 		n = (n < 0) ? -1 : l->length - l->at;
-	} else
-#endif
-	{
-		n = vfs_fd_write(vfs_stream(1), l->piece + l->at, (unsigned int)(l->length - l->at));
 	}
+#endif
 
 	if (n < 0) {
 		return LINES_GONE;
@@ -113,7 +111,7 @@ int lines_run(const char *name, lines_t *l)
 	}
 
 	/* what stdout already holds goes first */
-	vfs_stdout_flush();
+	fsync(1);
 
 	/* inside the command while the stream takes everything */
 	for (;;) {

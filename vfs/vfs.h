@@ -58,6 +58,7 @@
 
 #include "blk.h"
 #include "tfs.h"
+#include "../lib/posix.h" /* the calls a program has: open() flags, chdir(), mount(), ... */
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -126,8 +127,8 @@ int vfs_std_execute(void *args, int argc, char *argv[]);
 /** @brief The handle of the console, -1 when there is none. */
 int vfs_console(void);
 
-/** @brief true when the running task's streams are a terminal (`shell -t`, `std -t`). */
-bool vfs_terminal(void);
+/** @brief true when the running task's streams are a terminal (`shell -t`, `std -t`): isatty(0). */
+#define vfs_terminal() (isatty(0) != 0)
 
 /** @brief The handle behind 0, 1 or 2 for the running task: its own, else the console's, or -1. */
 int vfs_stream(int handle);
@@ -138,21 +139,6 @@ void vfs_stdout_flush(void);
 /* -------------------------------------------------------------------------- */
 /* the tree */
 
-/* open() flags; XC16 has no <fcntl.h>, so the values of its <bits/fcntl.h> */
-#ifndef O_WRONLY
-#define O_RDONLY 0
-#define O_WRONLY 01
-#define O_RDWR	 02
-#endif
-#ifndef O_CREAT
-#define O_CREAT	 0400
-#define O_EXCL	 02000
-#define O_TRUNC	 01000
-#define O_APPEND 0010
-#endif
-#ifndef O_ACCMODE
-#define O_ACCMODE 03
-#endif
 
 #define VFS_ROOT 0u  /**< Directory id of /. */
 #define VFS_BIN	 1u  /**< Directory id of /bin. */
@@ -252,20 +238,20 @@ int vfs_register_app(const char *path, int (*execute_handler)(void *args, int ar
 /** @brief Makes block device @p blk the node /dev/@p name. @return 0 or -1. */
 int vfs_blk_register(const char *name, vfs_blk_t *blk);
 
-/** @brief Creates a directory. @return 0 or -1. */
-int vfs_mkdir(const char *path);
+/** @brief Creates a directory: mkdir() (posix.h). @return 0 or -1. */
+#define vfs_mkdir(path) mkdir((path), 0)
 
 /**
  * @brief Removes a file, a RAM file (touch) or an empty directory.
  * @return 0, or -1 (devices and commands are not removed, nor a RAM file that is open).
  */
-int vfs_remove(const char *path);
+#define vfs_remove(path) remove(path) /* <stdio.h>'s remove() */
 
-/** @brief Renames or moves within one file system or within the node table. @return 0 or -1. */
-int vfs_rename(const char *from, const char *to);
+/** @brief Renames or moves within one file system or within the node table: rename(). @return 0 or -1. */
+#define vfs_rename(from, to) rename((from), (to))
 
-/** @brief Changes the working directory. @return 0 or -1. */
-int vfs_chdir(const char *path);
+/** @brief Changes the working directory: chdir() (posix.h). @return 0 or -1. */
+#define vfs_chdir(path) chdir(path)
 
 /** @brief Writes the path of directory @p dir into @p buffer. @return 0 or -1. */
 int vfs_dir_path(uint8_t dir, char *buffer, unsigned int size);
@@ -340,7 +326,8 @@ int vfs_fs_register(vfs_fs_type_t *type);
  *
  * @return 0 or -1.
  */
-int vfs_mount_type(const char *type, const char *source, const char *path, bool format);
+#define vfs_mount_type(type, source, path, format)                                       \
+	mount((source), (path), (type), (format) ? MS_FORMAT : 0ul, NULL) /* posix.h */
 
 /**
  * @brief Mounts the tfs on block device @p dev at @p path (vfs_mount_type("tfs", ...)).
@@ -350,8 +337,8 @@ int vfs_mount_type(const char *type, const char *source, const char *path, bool 
  */
 int vfs_mount(const char *dev, const char *path, bool format);
 
-/** @brief Unmounts @p path (no file may be open on it). @return 0 or -1. */
-int vfs_umount(const char *path);
+/** @brief Unmounts @p path (no file may be open on it): umount() (posix.h). @return 0 or -1. */
+#define vfs_umount(path) umount(path)
 
 /** @brief The file system mounted at directory @p dir and its type, or NULL. */
 void *vfs_mount_get(uint8_t dir, const vfs_fs_type_t **type);

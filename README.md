@@ -23,7 +23,10 @@ board can be configured, tested and driven over a serial line without reflashing
   everyone: set your own with `passwd WORD` in the startup script** (`passwd -` switches it
   off; `SHELL_PASSWORD_DEFAULT` sets the default at build time).
 - **The C library, provided by vfs**: `open`, `read`, `write`, `close`, `lseek`,
-  `system`, `malloc`, `free` (XC16 links them from the kernel). A fixed heap: when a task
+  `system`, `malloc`, `free` (XC16 links them from the kernel), and the POSIX calls a program
+  needs besides (`lib/posix.h`: `chdir`, `getcwd`, `mkdir`, `remove`, `rename`, `mount`,
+  `umount`, `sync`, `fsync`, `isatty`, ...): the commands in `bin/` are programs on these,
+  the kernel and the vfs work underneath (docs/kernel.md, "Programs"). A fixed heap: when a task
   ends, what it owns is freed, its argument and what it got from `task_alloc()`.
 - **System time**: `date`, `uptime` and the node `date`, so a network can set it. UTC, kept
   from the moment it is set until a reset.
