@@ -59,8 +59,20 @@ Tasks never block or busy-wait; keep each call short.
 ## Watchdog
 
 Built with `-DLETS_WDT=1` (off by default), the scheduler starts the hardware watchdog in
-`tasks_start()` and kicks it once per loop, but only while every *watched* task has checked in
-within its deadline:
+`tasks_start()` and kicks it once per loop, but only while no task is late. **Every task is
+watched**, from `task_create()`:
+
+- **Ready tasks get their turn.** A task that returned 0, or whose sleep is over, must be called
+  within `LETS_WDT_DEFAULT_MS` (1000 by default). A sleeping task waits for nothing: it is never
+  late, however long it sleeps (event-driven and I/O-waiting tasks sleep or return 0 and are
+  called every loop). So a call that holds the loop too long makes the others late:
+  `top`: `reset watchdog (late: mnl, by: shell)` - `by` is the task with the longest call then.
+- **A task that never returns** stops the loop and so every kick; the hardware resets the chip.
+  The kernel notes the slot it calls before each call, in RAM kept across the reset:
+  `reset watchdog (hang: shell)`.
+- **A task that runs but makes no progress** (a stuck state machine that still returns) cannot be
+  seen by the scheduler; such a task asks for more with `task_watch()` and checks in with
+  `task_alive()`:
 
 ```c
 task_watch(task_create("link", link_task, NULL), 500); /* or task_watch(NULL, 500) from the task */
@@ -74,21 +86,23 @@ static int link_task(void *args, uint64_t now)
 }
 ```
 
-Tasks are not watched unless they ask, so idle, sleeping and slow tasks never hold the kicks
-back; `task_watch(t, 0)` lets a task go again. The deadline counts the task's sleep too: make it
-longer than its longest sleep. A task that never returns stops every kick, watched or not.
+  The deadline (1 to 32767 ms) counts the task's sleep too: make it longer than its longest
+  sleep. Late: `reset watchdog (late: link)`.
+- `task_watch(t, 0)` takes a task out altogether: one allowed to wait for its turn.
 
-Once a watched task is late the kicks stop for good and the watchdog resets the chip
-(`LETS_WDT_MS`, 2000 by default; a PIC24 takes its period from its config bits). Before that the
-kernel writes what happened to RAM that start-up does not clear; a trap does the same through
-`task_trap(code)`. After the reset `task_reset_reason()` says why (power-on, brown-out, MCLR pin,
-software, watchdog, trap), `task_fault()` which task, and `top` shows both: `reset watchdog
-(late: link)`, `reset trap 2 (in: shell)`. `top mem` lists the watched tasks and how long ago
-each checked in.
+The kernel stamps every task when `tasks_start()` begins, so a slow boot (`/boot/rc`) is not late.
 
-The cost: 6 bytes of RAM per task slot plus 44 bytes, a loop over the task table per pass. The
-ports provide `port_wdt_start(ms)`, `port_wdt_kick()` and `port_wdt_reset_cause()` (see
-`docs/porting.md`).
+Once a task is late the kicks stop for good and the watchdog resets the chip (`LETS_WDT_MS`,
+2000 by default; a PIC24 takes its period from its config bits); keep `LETS_WDT_DEFAULT_MS`
+below it. A trap goes through `task_trap(code)`. After the reset `task_reset_reason()` says why
+(power-on, brown-out, MCLR pin, software, watchdog, trap), `task_fault()` which task (`kind`
+`TASK_FAULT_LATE`, `_HANG` or `_TRAP`, `task`, `by`, `code`), and `top` shows both:
+`reset watchdog (late: link)`, `reset watchdog (hang: shell)`, `reset trap 2 (in: shell)`.
+`top mem` lists the tasks that check in (and how long ago) and those not watched.
+
+The cost: 6 bytes of RAM per task slot plus about 50 bytes; a loop over the task table per pass
+and two stores per task call. The hardware is the port's: `port_wdt_start(ms)`,
+`port_wdt_kick()`, `port_wdt_reset_now()`, `port_wdt_reset_cause(&raw)` (`docs/porting.md`).
 
 ## Memory
 

@@ -48,6 +48,10 @@
 #ifndef LETS_WDT_MS
 #define LETS_WDT_MS 2000u /**< Watchdog period asked of the port (a PIC24 takes its config bits). */
 #endif
+#ifndef LETS_WDT_DEFAULT_MS
+#define LETS_WDT_DEFAULT_MS 1000u /**< How long a ready task may wait for its turn (task_watch()). */
+#endif
+#define TASK_WATCH_ALIVE 0x8000u /**< In task_t.deadline: the task checks in with task_alive(). */
 
 /** State of a slot in the task table. */
 typedef enum {
@@ -89,8 +93,9 @@ typedef struct {
 	uint8_t state;		/**< A task_state_t. */
 	task_info_t info;	/**< Statistics. */
 #if LETS_WDT
-	uint16_t deadline; /**< ms it may go without task_alive(); 0: not watched. */
-	uint32_t alive;	   /**< Time of its last task_alive(), in us, wraps. */
+	/** ms it may wait while ready (or, with TASK_WATCH_ALIVE, go without task_alive()); 0: not watched. */
+	uint16_t deadline;
+	uint32_t alive; /**< End of its last call (or its last task_alive()), in us, wraps. */
 #endif
 } task_t;
 
@@ -105,15 +110,17 @@ typedef enum {
 	TASK_RESET_TRAP,
 } task_reset_t;
 
-/** What the kernel saw just before it let the chip reset (LETS_WDT), kept across the reset. */
+/** What the kernel saw just before the chip reset (LETS_WDT), kept across the reset. */
 typedef struct {
-	uint16_t kind;		   /**< TASK_FAULT_LATE or TASK_FAULT_TRAP. */
+	uint16_t kind;		   /**< TASK_FAULT_LATE, TASK_FAULT_TRAP or TASK_FAULT_HANG. */
 	uint16_t code;		   /**< The trap's number (as given to task_trap()). */
-	char task[TASK_NAME_SIZE]; /**< The task late or running then, "" outside a task. */
+	char task[TASK_NAME_SIZE]; /**< The task late, trapped or hung, "" outside a task. */
+	char by[TASK_NAME_SIZE];   /**< LATE while ready: the task with the longest call then. */
 } task_fault_t;
 
 #define TASK_FAULT_LATE 1u /**< A watched task missed its deadline: the kicks stopped. */
 #define TASK_FAULT_TRAP 2u /**< task_trap(): a CPU trap, then a reset. */
+#define TASK_FAULT_HANG 3u /**< The watchdog fired while this task ran: it never returned. */
 
 /**
  * @brief Prepares the scheduler. Call once, before any other task function.
@@ -180,7 +187,7 @@ float task_get_loop_time(void);
  */
 int task_stack(size_t *peak, size_t *size);
 
-/** @brief RCON at start-up: why the chip last reset (0 on a PC). */
+/** @brief The port's reset register at start-up (RCON, EMU RSTCAUSE; 0 on a PC). */
 uint16_t task_reset_cause(void);
 
 /** @brief Why the chip last reset, the same on every port. */
@@ -192,15 +199,21 @@ task_reset_t task_reset_reason(void);
 const task_fault_t *task_fault(void);
 
 /**
- * @brief Puts a task under the watchdog (LETS_WDT): it must call task_alive() at least every
- * @p deadline_ms, or the scheduler stops kicking the watchdog and the chip resets.
+ * @brief Changes how the watchdog (LETS_WDT) watches a task.
  *
- * Tasks are not watched unless they ask, so idle and slow tasks never hold the kicks back. The
- * deadline counts sleeping too: it must be longer than the task's longest sleep. A task that never
- * returns stops every kick on its own, watched or not. With LETS_WDT 0 this does nothing.
+ * Every task is watched from task_create(): once it is ready (it returned 0, or its sleep is
+ * over) it must get its turn within LETS_WDT_DEFAULT_MS, or the scheduler stops kicking the
+ * watchdog and the chip resets (`top`: `watchdog (late: TASK, by: the task with the longest call)`).
+ * A sleeping task is not late, however long it sleeps. A task that never returns stops every
+ * kick: `watchdog (hang: TASK)`.
+ *
+ * task_watch() asks for more: the task must call task_alive() at least every @p deadline_ms,
+ * sleeping included (make it longer than its longest sleep), so a task that runs but makes no
+ * progress resets the chip too. With LETS_WDT 0 this does nothing.
  *
  * @param t           The task, NULL for the running one.
- * @param deadline_ms 1 to 65535, or 0 to stop watching it.
+ * @param deadline_ms 1 to 32767 ms between task_alive() calls, or 0: not watched at all (not
+ *                    even the default; for a task allowed to wait for its turn).
  * @return 0, or -1 when there is no such task.
  */
 int task_watch(task_t *t, uint16_t deadline_ms);
@@ -209,19 +222,25 @@ int task_watch(task_t *t, uint16_t deadline_ms);
 void task_alive(void);
 
 /**
- * @brief Records a CPU trap with the running task and resets the chip (`reset` on XC16, else
- * reboot_reset()). With LETS_WDT on a PIC24 the kernel also defines MCC's
- * TRAPS_halt_on_error() to call it (unless LETS_WDT_NO_TRAPS), so a trap restarts the board.
+ * @brief Records a CPU trap with the running task and resets the chip (port_wdt_reset_now()).
+ * With LETS_WDT on a PIC24, port/pic24/wdt.c also defines MCC's TRAPS_halt_on_error() to call
+ * it (unless LETS_WDT_NO_TRAPS), so a trap restarts the board.
  */
 void task_trap(uint16_t code) __attribute__((noreturn));
 
 /*
- * Port hooks for LETS_WDT. task.c has PIC24 / dsPIC33 versions (weak); another port defines
- * them. port_wdt_reset_cause() is used with LETS_WDT 0 too (task_reset_reason()).
+ * The watchdog's port hooks, as the clock is the port's (docs/porting.md "Watchdog"): every
+ * decision is the kernel's, the port only drives the hardware. port/pic24/wdt.c (PIC24 /
+ * dsPIC33), port/efr32; a port without them (a PC) gets the kernel's empty ones (weak).
  */
-void port_wdt_start(uint16_t ms);     /**< Starts the watchdog, about @p ms. */
-void port_wdt_kick(void);	      /**< Clears it. */
-task_reset_t port_wdt_reset_cause(void); /**< Why the chip reset: called once, at start-up. */
+/** Starts the hardware watchdog with a period of about @p ms (LETS_WDT only, once). */
+void port_wdt_start(uint16_t ms);
+/** Clears it: the scheduler calls it once a loop (with LETS_WDT 0 too); a no-op before the start. */
+void port_wdt_kick(void);
+/** Resets the chip now (task_trap()); does not return. */
+void port_wdt_reset_now(void) __attribute__((noreturn));
+/** Why the chip reset, and the raw register in @p raw (0 if none): once, at task_initialize(). */
+task_reset_t port_wdt_reset_cause(uint16_t *raw);
 
 /** @brief Runs the scheduler loop. Never returns. */
 void tasks_start(void);

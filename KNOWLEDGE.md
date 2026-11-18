@@ -10,7 +10,7 @@ runs_on: []
 languages: [c]
 tags: [kernel, mcu, shell, scheduler, script]
 status: active
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # LETS
@@ -38,12 +38,17 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
 - **Tasks** (`kernel/task.h`): `task_create(name, fn, args)`; `fn` returns ms to sleep (`> 0`,
   max 32767), `0` run again, `< 0` stop (owned memory freed); `task_alloc()`, `task_stopping()`,
   `shell_wait(task)`.
-- **Watchdog** (`-DLETS_WDT=1`, off by default): the scheduler kicks the hardware watchdog once
-  per loop only while every watched task checked in: `task_watch(t|NULL, ms)` (0 = not watched,
-  the default), `task_alive()`; `task_trap(code)`; after a reset `task_reset_reason()` (enum) and
-  `task_fault()` (late task / trap code + task, kept in no-init RAM), shown by `top` and `top mem`.
-  Port hooks `port_wdt_start(ms)`, `port_wdt_kick()`, `port_wdt_reset_cause()`: PIC24 in
-  `task.c` (weak; also overrides MCC's weak `TRAPS_halt_on_error`), EFR32 WDOG0 in `port/efr32`.
+- **Watchdog** (`-DLETS_WDT=1`, off by default; branch `wdt-all` 2026-11-18): the scheduler kicks
+  the hardware watchdog once per loop while no task is late. Every task is watched from
+  `task_create()`: once ready (returned 0 / sleep over) it must be called within
+  `LETS_WDT_DEFAULT_MS` (1000), sleeping never counts -> `late: T, by: LONGEST_CALL`; a call that
+  never returns -> hardware reset, `hang: T` (running slot + task table in no-init RAM).
+  `task_watch(t|NULL, ms)` = must also call `task_alive()` within ms (1..32767, sleeps count),
+  `task_watch(t, 0)` = not watched at all. `task_trap(code)`; after a reset `task_reset_reason()`
+  and `task_fault()` (kind LATE/HANG/TRAP, task, by, code), shown by `top` and `top mem`.
+  Port hooks (all logic in `task.c`): `port_wdt_start(ms)`, `port_wdt_kick()` (every loop, also
+  LETS_WDT 0), `port_wdt_reset_now()`, `port_wdt_reset_cause(&raw)`: PIC24 `port/pic24/wdt.c`
+  (every PIC24 project must link it; also MCC's `TRAPS_halt_on_error`), EFR32 `port/efr32`, PC weak stubs.
 - **Nodes** (`vfs/vfs.h`): `vfs_node_create(name, hidden, args, &handlers)`,
   `vfs_register_app("/opt/name", execute)`, `vfs_blk_register()`; `vfs_peer_new()` - a driver
   signals a new peer on an input (the shell then asks its password again).
@@ -60,7 +65,7 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   250 data bytes), `ddata`, `pidlib`, `queue`, `ema_filter`, `medianfilter`, `uuid`.
 - **Build flags:** `TASKS_MAX_COUNT` (16), `VFS_NODES_MAX` (24), `MAX_BLOCK_COUNT` (32 heap
   blocks), `VFS_NO_TFS`, `VFS_SYSTEM_STACK` (384 B, XC16), `SHELL_PASSWORD_DEFAULT`, `LETS_WDT` (0),
-  `LETS_WDT_MS` (2000; PIC24 uses config bits), `LETS_WDT_NO_TRAPS`.
+  `LETS_WDT_MS` (2000; PIC24 uses config bits), `LETS_WDT_DEFAULT_MS` (1000), `LETS_WDT_NO_TRAPS`.
 
 ## Where things are
 
@@ -70,7 +75,8 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   tiny power-loss-safe file system (`tfs.c`, `tfsvfs.c`), `onefs.c`, `ed.c`, memory drivers
   `dev/` (25xx EEPROM, 23xx SRAM, SST25 flash, PIC24FJ flash, RAM disk, partitions).
 - `argscript/` - the script language. `lib/` - portable libraries.
-- `port/` - `host`, `cortex-m`, `efr32` (ZG23 linker script, flash, syscalls), `nrf52`.
+- `port/` - `host`, `cortex-m`, `efr32` (ZG23 linker script, flash, syscalls, watchdog), `nrf52`,
+  `pic24` (`wdt.c`: watchdog / reset-cause hooks).
 - `docs/` - `kernel.md`, `vfs.md`, `argscript.md`, `porting.md`, `linux.md`.
 - `examples/host/`, `tests/` - PC demos and host tests.
 
@@ -115,10 +121,14 @@ Other:
   not tested on hardware and not merged.
 - `tfs` directly (not through the vfs): `tfs_remove`/`tfs_rename` of an open file still frees its blocks;
   a TFS_TRUNC writer's close drops the old file even if another handle reads it.
-- Watchdog (2026-11-17): host-tested only (fake clock and watchdog, `tests/test_wdt.c`) and
-  compiled with XC16 / arm-none-eabi; not yet run on a PIC24 or EFR32. A PIC24 board needs
+- Watchdog: `wdt-all` (every task watched, hooks only in ports) tested on the EFR32 kits
+  2026-11-18, PIC24 compiled only. A PIC24 board needs `port/pic24/wdt.c` in its project and
   `FWDTEN = ON_SWDTEN`, `WINDIS = OFF`, `WDTCMX = LPRC`, `FWPSA`/`WDTPS` for the period
-  (docs/porting.md). A watched task's deadline includes its sleeps.
+  (docs/porting.md). A `task_watch()` deadline includes its sleeps. A stuck state machine that
+  still returns is caught only with `task_watch()` + `task_alive()`. The `late` record keeps
+  slot numbers until the reset (names read from the kept task table at boot): a slot reused in the
+  2 s before the reset shows the new name.
+- `make test`: `test_kernel` period checks (lines 333, 725) fail on a heavily loaded Mac (real clock), on main too.
 - One shared stack: on a full PIC24 board about 720 B; `printf()` takes up to 350 B.
 - The default shell password `123456` is public: every product must set its own.
 
@@ -131,3 +141,6 @@ Other:
   only the console shell (`task_stop_arg`).
 - 2026-11-17: watchdog in the scheduler (`LETS_WDT`): watched tasks, reset reason and fault
   record across the reset, traps restart the board.
+- 2026-11-18 (branch `wdt-all`): every task watched by the scheduler (ready-wait default, hang named
+  after the reset, `by:` the long call); watchdog hardware only behind four port hooks, PIC24 ones
+  moved to `port/pic24/wdt.c`.

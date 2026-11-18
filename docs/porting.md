@@ -1,7 +1,8 @@
 # Porting
 
 The kernel needs three things from a target: a microsecond clock, a heap and somewhere for
-stdout to go. Everything else is plain C.
+stdout to go, and four small watchdog hooks (below; a PC has empty ones). Everything else is
+plain C.
 
 ## Clock
 
@@ -74,14 +75,33 @@ write the board's device nodes.
 
 ## Watchdog
 
-Without `LETS_WDT` the scheduler clears a PIC24's watchdog on every loop; on its own that does
-nothing. With `-DLETS_WDT=1` the scheduler runs it (see `docs/kernel.md`) through three hooks:
+Like the clock, the watchdog is the kernel's: which tasks are watched, their deadlines, late and
+hung tasks, the reset reason and the fault kept across the reset, and `top`'s line all live in
+`kernel/task.c`. Boards and tasks never touch the watchdog's registers. The port drives the
+hardware through four hooks (`kernel/task.h`):
 
-| hook                          | PIC24 / dsPIC33 (in `task.c`, weak)   | EFR32 (`port/efr32`)          |
-|-------------------------------|---------------------------------------|-------------------------------|
-| `port_wdt_start(ms)`          | `RCONbits.SWDTEN = 1`; `ms` unused     | WDOG0 on the 1 kHz ULFRCO     |
-| `port_wdt_kick()`             | `clrwdt`                              | `WDOG0->CMD = CLEAR`          |
-| `port_wdt_reset_cause()`      | RCON                                  | EMU RSTCAUSE                  |
+| hook                            | contract                                                       |
+|---------------------------------|----------------------------------------------------------------|
+| `port_wdt_start(ms)`            | turn the hardware watchdog on, period about `ms` (`LETS_WDT_MS`); once, in `tasks_start()`, LETS_WDT only |
+| `port_wdt_kick()`               | clear it; once a scheduler loop (with LETS_WDT 0 too); a no-op before the start; fast (no waiting for a sync) |
+| `port_wdt_reset_now()`          | reset the chip now; does not return (`task_trap()`)             |
+| `port_wdt_reset_cause(&raw)`    | why the chip reset, as a `task_reset_t`, and the raw register in `raw`; once, in `task_initialize()` |
+
+| port                              | start                        | kick             | reset now          | cause            |
+|-----------------------------------|------------------------------|------------------|--------------------|------------------|
+| PIC24 / dsPIC33 `port/pic24/wdt.c` | `RCONbits.SWDTEN = 1` (period: config bits) | `clrwdt` | `reset`     | RCON (then clears its flags) |
+| EFR32 `port/efr32/efr32.c`        | WDOG0 on the 1 kHz ULFRCO    | `WDOG0->CMD = CLEAR` unless syncing | `NVIC_SystemReset()` | EMU RSTCAUSE |
+| a PC (none)                       | the kernel's weak empty hooks: no watchdog, reason `-`; `port_wdt_reset_now()` calls `reboot_reset()` |||
+
+**Every PIC24 / dsPIC33 project links `port/pic24/wdt.c`** (with LETS_WDT 0 too: the kick and
+the reset cause are there). The kernel has no weak PIC24 hooks, so a project without the file does
+not link rather than run without a watchdog. The host tests (`tests/test_wdt.c`) define the four
+hooks as a simulated watchdog on a fake clock.
+
+The kernel keeps the fault, the slot running now and the task table in RAM that start-up does
+not clear: a `persistent` variable on XC16, `.noinit` on Cortex-M (the EFR32 linker script has
+it; another Cortex-M linker script needs a `.noinit (NOLOAD)` section in RAM). That is how a task
+that never returns is named after the reset (`watchdog (hang: TASK)`).
 
 A PIC24F (e.g. PIC24FJ1024GA606) sets the period in its config bits and lets software turn the
 watchdog on; `FWDTEN = OFF` also locks `SWDTEN` out:
@@ -94,19 +114,15 @@ watchdog on; `FWDTEN = OFF` also locks `SWDTEN` out:
 #pragma config WDTPS = PS512        // ... x 512: about 2.1 s (PS1024: 4.2 s)
 ```
 
-The period must be longer than the slowest call of any task (a flash erase, say). Other
+The period must be longer than the slowest call of any task (a flash erase, say), and longer than
+`LETS_WDT_DEFAULT_MS` (1000), so a task kept waiting is named before the hardware resets. Other
 families name the bits differently: see the device's config-bit list in the XC16 docs.
 
 Traps: MCC's `traps.c` ends every trap in `TRAPS_halt_on_error(code)`, a weak function. With
-`LETS_WDT` the kernel defines it: it records the trap and the running task and executes `reset`,
+`LETS_WDT`, `port/pic24/wdt.c` defines it: it records the trap and the running task and resets,
 so the board comes back and `top` shows `reset trap 2 (in: shell)` (MCC's codes: 0 oscillator,
 1 stack, 2 address, 3 math). A project with its own trap handlers calls `task_trap(code)` from
-them, and sets `-DLETS_WDT_NO_TRAPS` if it defines `TRAPS_halt_on_error()` itself. The record
-lives in a `persistent` variable (XC16), in `.noinit` on Cortex-M (the EFR32 linker script has
-it).
-
-Another port defines the three hooks; without them (a PC) there is no watchdog and the reason is
-`-`. `port_wdt_reset_cause()` is used without `LETS_WDT` too.
+them, and sets `-DLETS_WDT_NO_TRAPS` if it defines `TRAPS_halt_on_error()` itself.
 
 ## Limits
 

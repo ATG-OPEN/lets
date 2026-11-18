@@ -6,11 +6,16 @@
  * defined here. A reset is a longjmp() back to main(), which starts the kernel again, as a
  * chip does; the fault record survives it as it survives a reset in no-init RAM.
  *
- *   boot 0  watched tasks check in, idle / busy / unwatched tasks do not: kicks go on;
- *           then "bad" stops checking in: the kicks stop and the fake watchdog fires
+ *   boot 0  a slow boot (3 s before tasks_start()); every task is watched by default: a busy
+ *           one, ones asleep longer than the default deadline (not late: asleep), ones that
+ *           check in (task_watch()), one that stops being watched; then "bad" stops checking
+ *           in: the kicks stop and the fake watchdog fires
  *   boot 1  the reset says watchdog, late: bad; a task traps (task_trap())
- *   boot 2  the reset says trap 2, in: crasher; the next reset has no fault
- *   boot 3  overhead: one pass with 15 watched tasks against 15 unwatched ones
+ *   boot 2  the reset says trap 2, in: crasher; "hog" takes 1.5 s in one call: the others,
+ *           ready, wait longer than LETS_WDT_DEFAULT_MS
+ *   boot 3  watchdog, late: victim, by: hog; "spinner" never returns
+ *   boot 4  watchdog, hang: spinner; the next reset has no fault
+ *   boot 5  overhead: one pass with 15 tasks that check in against 15 not watched
  */
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
@@ -76,8 +81,9 @@ void port_wdt_kick(void)
 	kicks++;
 }
 
-task_reset_t port_wdt_reset_cause(void)
+task_reset_t port_wdt_reset_cause(uint16_t *raw)
 {
+	*raw = (uint16_t)cause;
 	return cause;
 }
 
@@ -91,12 +97,17 @@ void reboot_reset(void)
 
 static int idle(void *arg, uint64_t now)
 {
-	return 30000; /* unwatched, asleep for longer than any deadline */
+	return 30000; /* asleep for longer than any deadline */
+}
+
+static int nap(void *arg, uint64_t now)
+{
+	return 1500; /* asleep longer than LETS_WDT_DEFAULT_MS, again and again */
 }
 
 static int busy(void *arg, uint64_t now)
 {
-	return 0; /* unwatched, never checks in */
+	return 0; /* never checks in: the default watch, it just runs */
 }
 
 static int good(void *arg, uint64_t now)
@@ -143,6 +154,35 @@ static int check0(void *arg, uint64_t now)
 static int crasher(void *arg, uint64_t now)
 {
 	task_trap(2);
+}
+
+/* ---- boot 2, 3 ------------------------------------------------------------------------ */
+
+static int victim(void *arg, uint64_t now)
+{
+	return 10;
+}
+
+static int hog(void *arg, uint64_t now)
+{
+	if (now > 1000000u) {
+		while (task_get_system_time() < now + 1500000u) {
+			/* 1.5 s in one call: less than the watchdog, more than the others may wait */
+		}
+	}
+
+	return 10;
+}
+
+static int spinner(void *arg, uint64_t now)
+{
+	if (now > 1000000u) {
+		for (;;) {
+			(void)task_get_system_time(); /* never returns */
+		}
+	}
+
+	return 0;
 }
 
 /* ---- boot 3 --------------------------------------------------------------------------- */
@@ -223,12 +263,14 @@ int main(void)
 	case 0:
 		CHECK(task_reset_reason() == TASK_RESET_POWER_ON && f == NULL);
 		task_create("idle", idle, NULL);
+		task_create("nap", nap, NULL);
 		task_create("busy", busy, NULL);
 		task_watch(task_create("good", good, NULL), 100);
 		task_watch(task_create("bad", bad, NULL), 200);
 		task_watch(task_create("quits", quits, NULL), 100);
 		task_create("check0", check0, NULL);
 		CHECK(task_watch(NULL, 100) == -1); /* outside a task */
+		fake_us += 3000000u; /* a slow rc: not late, they wait from tasks_start() */
 		break;
 
 	case 1:
@@ -238,7 +280,8 @@ int main(void)
 		CHECK(last_kick >= 5000000u && last_kick <= 5300000u);
 		CHECK(fake_us - last_kick > LETS_WDT_MS * 1000u);
 		CHECK(task_reset_reason() == TASK_RESET_WATCHDOG);
-		CHECK(f != NULL && f->kind == TASK_FAULT_LATE && strcmp(f->task, "bad") == 0);
+		CHECK(f != NULL && f->kind == TASK_FAULT_LATE && strcmp(f->task, "bad") == 0 &&
+		      f->by[0] == '\0');
 		task_create("crasher", crasher, NULL);
 		break;
 
@@ -246,7 +289,28 @@ int main(void)
 		CHECK(task_reset_reason() == TASK_RESET_TRAP);
 		CHECK(f != NULL && f->kind == TASK_FAULT_TRAP && f->code == 2 &&
 		      strcmp(f->task, "crasher") == 0);
-		reset(TASK_RESET_PIN, 3);
+		fake_us = 0;
+		task_create("victim", victim, NULL);
+		task_create("idle", idle, NULL);
+		task_create("hog", hog, NULL);
+		break;
+
+	case 3:
+		fprintf(stderr, "wdt: late at %.3f s, reset at %.3f s\n", last_kick / 1e6, fake_us / 1e6);
+		CHECK(task_reset_reason() == TASK_RESET_WATCHDOG);
+		CHECK(f != NULL && f->kind == TASK_FAULT_LATE && strcmp(f->task, "victim") == 0 &&
+		      strcmp(f->by, "hog") == 0);
+		fake_us = 0;
+		task_create("nap", nap, NULL);
+		task_create("spinner", spinner, NULL);
+		task_create("busy", busy, NULL);
+		break;
+
+	case 4:
+		CHECK(task_reset_reason() == TASK_RESET_WATCHDOG);
+		CHECK(f != NULL && f->kind == TASK_FAULT_HANG && strcmp(f->task, "spinner") == 0 &&
+		      f->by[0] == '\0');
+		reset(TASK_RESET_PIN, 5);
 		break;
 
 	default:

@@ -172,9 +172,11 @@ uint32_t efr32_reset_reason(void)
 
 /* ---- watchdog: the scheduler's (LETS_WDT), see task.h ---------------------------------- */
 
-task_reset_t port_wdt_reset_cause(void)
+task_reset_t port_wdt_reset_cause(uint16_t *raw)
 {
 	uint32_t r = reset_reason;
+
+	*raw = (uint16_t)r;
 
 	/* POR first: the other bits are not valid with it (a kit's power-on reads POR + PIN) */
 	return (r & EMU_RSTCAUSE_POR)				     ? TASK_RESET_POWER_ON
@@ -187,7 +189,8 @@ task_reset_t port_wdt_reset_cause(void)
 		       : TASK_RESET_OTHER;
 }
 
-#if LETS_WDT
+static bool wdt_on; /* WDOG0 has its clock: port_wdt_start() */
+
 /* WDOG0 on the 1 kHz ULFRCO: 2^(3 + PERSEL) + 1 ticks, the first at least @p ms; it stops
  * under a debugger and in EM2 */
 void port_wdt_start(uint16_t ms)
@@ -207,17 +210,22 @@ void port_wdt_start(uint16_t ms)
 
 	WDOG0->CFG = sel << _WDOG_CFG_PERSEL_SHIFT;
 	WDOG0->EN_SET = WDOG_EN_EN;
+	wdt_on = true;
 }
 
 /* once per scheduler loop: a clear takes a few ULFRCO ticks (~3 ms) to sync, and waiting for it
  * slowed the loop to ~4 ms (262/s on a ZG23 kit, 2026-11-17); the kicks meanwhile are skipped */
 void port_wdt_kick(void)
 {
-	if (!(WDOG0->SYNCBUSY & WDOG_SYNCBUSY_CMD)) {
+	if (wdt_on && !(WDOG0->SYNCBUSY & WDOG_SYNCBUSY_CMD)) {
 		WDOG0->CMD = WDOG_CMD_CLEAR;
 	}
 }
-#endif
+
+void port_wdt_reset_now(void)
+{
+	NVIC_SystemReset();
+}
 
 /* ---- GPIO ----------------------------------------------------------------------------- */
 

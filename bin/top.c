@@ -128,10 +128,12 @@ static void top_reset(top_text_t *l)
 {
 	static const char *const names[] = {"-",	"power-on", "brown-out", "MCLR pin",
 					    "software", "watchdog", "trap"};
-	const task_fault_t *f = task_fault();
 	unsigned int r = (unsigned int)task_reset_reason();
 
 	top_put(l, names[(r < sizeof(names) / sizeof(names[0])) ? r : 0u]);
+
+#if LETS_WDT
+	const task_fault_t *f = task_fault();
 
 	if (f == NULL) {
 		return;
@@ -142,9 +144,18 @@ static void top_reset(top_text_t *l)
 		top_uint(l, f->code, 0, ' ');
 	}
 
-	top_put(l, (f->kind == TASK_FAULT_LATE) ? " (late: " : " (in: ");
+	top_put(l, (f->kind == TASK_FAULT_LATE)	  ? " (late: "
+		   : (f->kind == TASK_FAULT_HANG) ? " (hang: "
+						  : " (in: ");
 	top_put(l, (f->task[0] != '\0') ? f->task : "-");
+
+	if (f->by[0] != '\0') {
+		top_put(l, ", by: ");
+		top_put(l, f->by);
+	}
+
 	top_put(l, ")");
+#endif
 }
 
 static const char *top_state(uint8_t state)
@@ -344,12 +355,17 @@ int top(void *args, int argc, char *argv[])
 		task_t *t = task_get_data();
 		uint32_t now = (uint32_t)task_get_system_time();
 
-		printf("watchdog %u ms\n", (unsigned)LETS_WDT_MS);
+		printf("watchdog %u ms, ready tasks %u ms\n", (unsigned)LETS_WDT_MS,
+		       (unsigned)LETS_WDT_DEFAULT_MS);
 
 		for (int i = 0; i < TASKS_MAX_COUNT; i++) {
-			if (t[i].state != TASK_UNUSED && t[i].deadline != 0) {
-				printf("  %s %u ms, alive %lu ms ago\n", t[i].info.name, t[i].deadline,
+			/* the ones that check in (task_watch()), and the ones not watched */
+			if (t[i].state != TASK_UNUSED && (t[i].deadline & TASK_WATCH_ALIVE)) {
+				printf("  %s %u ms, alive %lu ms ago\n", t[i].info.name,
+				       t[i].deadline & ~TASK_WATCH_ALIVE,
 				       (unsigned long)((now - t[i].alive) / 1000u));
+			} else if (t[i].state != TASK_UNUSED && t[i].deadline == 0) {
+				printf("  %s not watched\n", t[i].info.name);
 			}
 		}
 #endif
