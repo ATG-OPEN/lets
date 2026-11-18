@@ -10,7 +10,6 @@
 #include "../kernel/task.h"
 
 #include <unistd.h>
-#include <stdlib.h>
 #include <string.h>
 
 static vfs_node_t vfs_nodes[VFS_NODES_MAX];
