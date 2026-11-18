@@ -21,7 +21,6 @@ static uint64_t fake_clock(void)
 }
 #include "../lib/args.h"
 #include "../vfs/vfs.h"
-#include "../vfs/vfs.h"
 #include "../vfs/dev/ramdisk.h"
 #include "../vfs/dev/ee25.h"
 #include "../vfs/dev/sram23.h"

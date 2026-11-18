@@ -14,8 +14,6 @@
 
 #include <pthread.h>
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 
 #include "../opt/tty.c"
 

@@ -10,7 +10,6 @@
 #include "../bin/shell.h"
 #include "../bin/kill.h"
 #include "../bin/reboot.h"
-#include "../bin/tmp.h"
 #include "../bin/top.h"
 #include "../vfs/vfs.h"
 
