@@ -35,7 +35,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <unistd.h>
 
 #ifndef TASKS_MAX_COUNT
 #define TASKS_MAX_COUNT 16u /**< Size of the task table: a project can set its own. */

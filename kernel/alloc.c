@@ -10,7 +10,6 @@
 #include "alloc.h"
 
 #include <stdio.h>
-#include <string.h>
 #include <stdbool.h>
 
 static block_t blocks[MAX_BLOCK_COUNT];
