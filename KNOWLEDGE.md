@@ -74,9 +74,10 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
 ## Where things are
 
 - `kernel/` - scheduler (`task.c`), heap (`alloc.c`).
-- `bin/` - shell and kernel commands (`shell.c`, `top.c`, `kill.c`, `date.c`, `reboot.c`, `sys.c`).
-- `vfs/` - node table (`node.c`), tree (`vfs.c`), POSIX calls (`posix.c`), RAM files of /tmp (`tmp.c`), file commands (`bin.c`),
-  tiny power-loss-safe file system (`tfs.c`, `tfsvfs.c`), `onefs.c`, `ed.c`, memory drivers
+- `bin/` - the programs: shell and commands (`shell.c`, `bin.c` - the command table and the file
+  commands, `top.c`, `kill.c`, `date.c`, `reboot.c`, `sys.c`, `ed.c`, `lines.c`).
+- `vfs/` - node table (`node.c`), tree (`vfs.c`), POSIX calls (`posix.c`), RAM files of /tmp (`tmp.c`),
+  tiny power-loss-safe file system (`tfs.c`, `tfsvfs.c`), `onefs.c`, memory drivers
   `dev/` (25xx EEPROM, 23xx SRAM, SST25 flash, PIC24FJ flash, RAM disk, partitions).
 - `argscript/` - the script language. `lib/` - portable libraries.
 - `port/` - `host`, `cortex-m`, `efr32` (ZG23 linker script, flash, syscalls, watchdog), `nrf52`,
@@ -93,14 +94,14 @@ make docs         # Doxygen into build/docs/html
 make format       # Linux kernel style, 100 columns
 ```
 
-On an MCU: add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`, `vfs/bin.c`,
+On an MCU: add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`,
 `lib/args.c` (+ `opt/` nodes, `vfs/tfs.c` and `vfs/dev/` drivers when file systems are wanted)
 to the project.
 
 ## Keep in sync
 
 - [ ] A public function changed: its header documentation and the matching `docs/*.md`.
-- [ ] A new source file that another kernel file needs (e.g. `vfs/bin.c` calls `bin/reboot.c`):
+- [ ] A new source file that another kernel file needs (e.g. `vfs/posix.c` calls `vfs/tmp.c`):
   say so in README "On the MCU" - projects list kernel sources by hand and stop linking.
 - [ ] Shell output format (prompt, password prompt, error lines): programs that drive a shell
   over a link parse it; note the change in the commit and README.

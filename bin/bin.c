@@ -2,17 +2,19 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * The built-in commands: a table in flash, so they take no RAM.
+ * The built-in commands: a table in flash, so they take no RAM. system() (vfs/posix.c) finds a
+ * command here by its name, after the nodes (vfs.h, vfs_commands).
  */
 
-#include "vfs.h"
-#include "../bin/shell.h"
-#include "../bin/date.h"
-#include "../bin/kill.h"
-#include "../bin/reboot.h"
-#include "tmp.h"
-#include "../bin/top.h"
-#include "../bin/lines.h"
+#include "shell.h"
+#include "date.h"
+#include "kill.h"
+#include "reboot.h"
+#include "top.h"
+#include "lines.h"
+
+#include "../vfs/vfs.h"
+#include "../vfs/tmp.h"
 #include "../kernel/task.h"
 
 #include <unistd.h>

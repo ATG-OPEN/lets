@@ -25,8 +25,8 @@ in the home), `ls` lists plain names (`ls -p` marks the directories, `ls -l` sho
 | | |
 |-|-|
 | always | `vfs/node.c` (the table), `vfs/vfs.c` (the tree), `vfs/posix.c` (`open`, `read`, `write`, `close`, `lseek`, `system`), `vfs/tmp.c` (RAM files) |
-| always too | `vfs/bin.c`: the built-in commands in flash, `ls cat echo rm mv touch cd pwd mkdir cp mount umount df date uptime std kill top shell reboot sync passwd` (+ `crc mkfs` with tfs), the prompt, Tab on paths; `bin/date.c` the system time |
-| with tfs | `vfs/tfs.c`, `vfs/tfsvfs.c` (tfs as the mount type "tfs"), drivers from `vfs/dev/`, optionally `vfs/ed.c` |
+| always too | `bin/bin.c`: the built-in commands in flash, `ls cat echo rm mv touch cd pwd mkdir cp mount umount df date uptime std kill top shell reboot sync passwd` (+ `crc mkfs` with tfs), the prompt, Tab on paths; `bin/date.c` the system time |
+| with tfs | `vfs/tfs.c`, `vfs/tfsvfs.c` (tfs as the mount type "tfs"), drivers from `vfs/dev/`, optionally `bin/ed.c` |
 | a tiny `/boot` | `vfs/onefs.c`: the mount type "one", one file (rc) on a memory too small for tfs |
 | `-DVFS_NO_TFS` | no tfs: for a small MCU with no memory to keep files on. Mounts of other types (a project's own) still work; `VFS_DIRS_MAX` is 6 |
 | `-DVFS_NODES_MAX=n` | the node table: 24 entries of 22 bytes on a PIC24, for devices, RAM files and commands of a project |
@@ -354,7 +354,7 @@ A PIC24FJ256GB412 board boots this way, with its shell on USB CDC.
 | `vfs/tfs.c` | 5.3 KB (3.9 KB with `TFS_READONLY`) | - |
 | `vfs/vfs.c` | 4.9 KB | 230 B (8 directories, 8 handles) |
 | `vfs/node.c` / `vfs/posix.c` | 0.4 / 1.5 KB | 530 B (24 nodes) / 260 B |
-| `vfs/bin.c` (21 commands, prompt, Tab) | 4.3 KB | - |
+| `bin/bin.c` (21 commands, prompt, Tab) | 4.3 KB | - |
 | `vfs/dev/flash24.c` / `part.c` | 1.5 / 0.2 KB | - |
 | `vfs/dev/ee25.c` / `sram23.c` / `ramdisk.c` | 0.7 / 0.45 / 0.2 KB | - |
 | `vfs/dev/sst25.c` | 2.4 KB | - |

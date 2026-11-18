@@ -72,7 +72,7 @@ same with file systems: try `ls /`, `ls -l /dev`, `cd /mnt/ee`, `echo hi > f`, `
 
 ## On the MCU
 
-Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`, `vfs/bin.c`,
+Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`,
 `lib/args.c` and `port/pic24/wdt.c` (the watchdog, reset-cause and stack hooks; needed with or without
 `LETS_WDT`) to your MPLAB X project (XC16), plus any `opt/` node your board uses (the PIC24 UART
 `opt/tty.h` is `port/pic24/tty.c`; the device ID is `port/pic24/uuid.c`). Without
@@ -157,9 +157,9 @@ See [docs/kernel.md](docs/kernel.md) (rules: tasks, memory, nodes, commands, sty
 | Path | |
 |------|-|
 | `kernel/` | scheduler (`task`), heap (`alloc`) |
-| `bin/` | the shell and its kernel commands (`top`, `kill`, RAM files) |
+| `bin/` | the programs: the shell and its commands (`bin.c`: the table of built-in commands and the file commands `ls cat cp ...`; `top`, `kill`, `ed`, ...) |
 | `opt/` | optional nodes for a board: `gpa` (a GPIO pin, ADC or DAC channel as a node, in physical units), `tty` (`tty.h`: a UART that never makes a write wait, with an RS485 direction pin; the PIC24F one is `port/pic24/tty.c`) |
-| `vfs/` | the node table (`node`), the tree (`vfs`), the C-library calls (`posix`), the file commands (`bin`), the tiny file system (`tfs`), memory drivers (`dev/`: SPI EEPROM, SPI SRAM, SST25VF SPI flash, RAM disk, PIC24FJ flash, partitions) |
+| `vfs/` | the node table (`node`), the tree (`vfs`), the C-library calls (`posix`), RAM files (`tmp`), the tiny file system (`tfs`), memory drivers (`dev/`: SPI EEPROM, SPI SRAM, SST25VF SPI flash, RAM disk, PIC24FJ flash, partitions) |
 | `argscript/` | the script language |
 | `lib/` | `args` (command-line parsing) and the portable libraries, see [lib/README.md](lib/README.md) |
 | `port/` | everything that touches a chip: `pic24` (watchdog, reset and stack hooks `wdt.c`, UART `tty.c`, device ID `uuid.c`, program flash `flash24.c`), `efr32`, `nrf52`, `cortex-m`, `host` (the PC build) |

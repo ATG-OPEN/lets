@@ -9,8 +9,9 @@
  * memory between commands.
  */
 
-#include "vfs.h"
-#include "../bin/lines.h"
+#include "lines.h"
+
+#include "../vfs/vfs.h"
 
 #include <unistd.h>
 #include <stdio.h>

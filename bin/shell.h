@@ -115,4 +115,25 @@ void shell_node_names(const char *word, bool command, bool (*candidate)(const ch
  */
 void shell_names_set(shell_names_t names);
 
+/**
+ * @brief Registers the file commands' prompt and Tab completion, and the node `date` (call after
+ * shell_initialize()). The commands themselves are the table vfs_commands, in bin/bin.c. @return 0.
+ */
+int vfs_bin_initialize(void);
+
+/**
+ * @brief The `ed` command (bin/ed.c, optional): edits a file one line per command.
+ *
+ * @code
+ * vfs_register_app("ed", vfs_ed);
+ * @endcode
+ * ed FILE lists it numbered; ed FILE Nc TEXT changes line N, Na adds after
+ * it (0a: first), Ni inserts before it, Nd deletes it. FILE is a file of a
+ * mounted file system (a new one may be a RAM file). The file is copied to
+ * a new version of itself (O_TRUNC) 16 bytes at a time with the edit made on
+ * the way, so a file larger than the free heap can be edited, and an edit
+ * that fails (or a line number past the end) leaves the file as it was.
+ */
+int vfs_ed(void *args, int argc, char *argv[]);
+
 #endif /* SHELL_H */

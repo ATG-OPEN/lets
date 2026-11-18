@@ -41,8 +41,8 @@
  * out `<`, `>`, `>>` and the `shell` command for a full flash.
  *
  * A project links vfs/node.c, vfs.c, posix.c (the C library calls with path
- * support), bin.c (the shell commands) and, without VFS_NO_TFS, tfs.c and
- * tfsvfs.c, and boots:
+ * support), tmp.c (RAM files) and, without VFS_NO_TFS, tfs.c and tfsvfs.c,
+ * with the programs of bin/ (the shell and its commands, bin/bin.c), and boots:
  * @code
  * vfs_initialize();                        // the node table, /opt, /tmp, /mnt
  * board_initialize();                      // devices, vfs_blk_register("ee0", ...)
@@ -106,7 +106,7 @@ typedef struct {
 	int (*run)(void *args, int argc, char *argv[]);
 } vfs_command_t;
 
-extern const vfs_command_t vfs_commands[];     /**< The built-in commands (bin.c). */
+extern const vfs_command_t vfs_commands[];     /**< The built-in commands: the programs' table (bin/bin.c). */
 extern const unsigned int vfs_commands_count;  /**< How many. */
 
 /** @brief Returns the node table (VFS_NODES_MAX entries). */
@@ -494,22 +494,5 @@ int vfs_tmp_create(const vfs_path_t *p);
  */
 void vfs_interpreter_set(int (*run)(void *args, int argc, char *argv[]));
 
-/**
- * @brief The `ed` command (vfs/ed.c, optional): edits a file one line per command.
- *
- * @code
- * vfs_register_app("ed", vfs_ed);
- * @endcode
- * ed FILE lists it numbered; ed FILE Nc TEXT changes line N, Na adds after
- * it (0a: first), Ni inserts before it, Nd deletes it. FILE is a file of a
- * mounted file system (a new one may be a RAM file). The file is copied to
- * a new version of itself (O_TRUNC) 16 bytes at a time with the edit made on
- * the way, so a file larger than the free heap can be edited, and an edit
- * that fails (or a line number past the end) leaves the file as it was.
- */
-int vfs_ed(void *args, int argc, char *argv[]);
-
-/** @brief Registers the vfs commands (call after shell_initialize()). @return 0. */
-int vfs_bin_initialize(void);
 
 #endif /* VFS_H */

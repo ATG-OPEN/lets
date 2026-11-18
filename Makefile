@@ -15,11 +15,11 @@ PRELUDE = -include port/host/prelude.h
 
 # the kernel, its shell and vfs without tfs (VFS_NO_TFS, as on a small MCU) ...
 KERNEL  = kernel/task.c kernel/alloc.c lib/args.c $(wildcard bin/*.c) \
-          vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/bin.c vfs/onefs.c
+          vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/onefs.c
 NOFS    = -DVFS_NO_TFS
 
 # ... and with tfs and the memory drivers
-VFS     = $(KERNEL) vfs/tfs.c vfs/tfsvfs.c vfs/ed.c $(filter-out vfs/dev/flash24.c,$(wildcard vfs/dev/*.c))
+VFS     = $(KERNEL) vfs/tfs.c vfs/tfsvfs.c $(filter-out vfs/dev/flash24.c,$(wildcard vfs/dev/*.c))
 
 all: build/lets-demo build/lets-vfs-demo
 
