@@ -139,3 +139,13 @@ It owns its UARTs, so when MCC runs again it must leave them out, or `uartN.c` c
 the same interrupts. The interrupt priorities stay in MCC's `interrupt_manager.c`; keep the UARTs'
 transmit interrupts at one priority when their direction pins share a LATx (see `opt/tty.h`). dsPIC33CK has
 another UART: projects on it keep MCC's driver.
+
+Full-duplex RS485 on a straight cable (`-m DPX1` / `DPX2`): the pin picks the pair a port sends on,
+so the two ends must be in opposite modes. The driver finds the right one itself, like auto-MDIX:
+a DPX port that has received nothing for 2 to 4 s (pseudo-random per port, `opt/tty_dpx.h`, seeded
+by the port, its address and the clock) swaps DPX1 <-> DPX2. A port that hears bytes (a DRN link
+pings every second) never swaps; `ttyS1 -a 0` keeps the direction; STD and SPX never swap. It
+costs ~600 B of code and 10 B of RAM a port (PIC24); a full board builds it out with
+`-DTTY_DPX_AUTO=0` (DPX then keeps the mode it is given). Host
+tests: `tests/test_tty_dpx.c` (a cable model: 2,000 starts link after ~5 s on average, ~25 s at
+worst) and `tests/test_tty.c`.

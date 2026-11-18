@@ -11,6 +11,7 @@
 #include "tty.h"
 
 #include "../vfs/vfs.h"
+#include "../kernel/task.h"
 
 #include <xc.h>
 #include <stdio.h>
@@ -253,6 +254,56 @@ static void tty_start(tty_args_t *a, tty_uart_t *u)
 	tty_pin(a, true);
 }
 
+static bool tty_full_duplex(const tty_args_t *a)
+{
+	return a->mode == TTY_MODE_RS_DPX1 || a->mode == TTY_MODE_RS_DPX2;
+}
+
+/* 1 <-> 2 of the mode; DPX sends on the other pair from now, SPX from its next write */
+static void tty_swap(tty_args_t *a)
+{
+	a->mode = (a->mode & 1u) ? a->mode + 1 : a->mode - 1;
+
+	if (tty_full_duplex(a)) {
+		tty_pin(a, true);
+	}
+}
+
+#if TTY_DPX_AUTO
+/* the time in 1.024 ms steps, for tty_dpx.h: no 64-bit division (its waits are 2.0 to 4.2 s) */
+static uint32_t tty_ms(void)
+{
+	return (uint32_t)(task_get_system_time() >> 10);
+}
+
+/* the silence starts now: a whole wait before the next swap */
+static void tty_quiet(tty_args_t *a)
+{
+	tty_dpx_heard(&a->dpx, tty_ms());
+}
+
+/* DPX that hears nothing tries the other pair, now and then (tty_dpx.h) */
+static void tty_auto(tty_args_t *a, bool heard)
+{
+	if (!tty_full_duplex(a) || a->fixed) {
+		return;
+	}
+
+	uint64_t us = task_get_system_time();
+	uint32_t ms = (uint32_t)(us >> 10);
+
+	if (heard) {
+		tty_dpx_heard(&a->dpx, ms);
+	} else if (tty_dpx_due(&a->dpx, ms, (uint16_t)us)) {
+		tty_swap(a);
+		a->swaps++;
+	}
+}
+#else
+#define tty_quiet(a)	   ((void)(a))
+#define tty_auto(a, heard) ((void)(a))
+#endif
+
 static int tty_write(void *args, void *buffer, unsigned int length)
 {
 	tty_args_t *a = args;
@@ -262,7 +313,8 @@ static int tty_write(void *args, void *buffer, unsigned int length)
 	/* nothing to send: a link that gets no answer tries the wires the other way round */
 	if (length == 0) {
 		if (a->swap && a->mode != TTY_MODE_STANDARD) {
-			a->mode = (a->mode & 1u) ? a->mode + 1 : a->mode - 1;
+			tty_swap(a);
+			tty_quiet(a);
 		}
 
 		return 0;
@@ -300,6 +352,8 @@ static int tty_read(void *args, void *buffer, unsigned int length)
 	uint8_t *data = buffer;
 	unsigned int n = 0;
 
+	tty_auto(a, a->rx_head != a->rx_tail);
+
 	while (n < length && a->rx_head != a->rx_tail) {
 		uint8_t head = a->rx_head;
 
@@ -324,9 +378,25 @@ static int tty_execute(void *args, int argc, char *argv[])
 	tty_args_t *a = args;
 
 	if (argc == 2 && strcmp(argv[1], "-stat") == 0) {
-		printf("%lu %s lost %u\n", (unsigned long)a->baud, tty_modes[a->mode], a->lost);
+		printf("%lu %s lost %u", (unsigned long)a->baud, tty_modes[a->mode], a->lost);
+
+#if TTY_DPX_AUTO
+		if (tty_full_duplex(a)) {
+			printf(a->fixed ? " fixed" : " swaps %u", a->swaps);
+		}
+#endif
+
+		printf("\n");
 		return 0;
 	}
+
+#if TTY_DPX_AUTO
+	if (argc == 3 && strcmp(argv[1], "-a") == 0 && (argv[2][0] == '0' || argv[2][0] == '1')) {
+		a->fixed = argv[2][0] == '0';
+		tty_quiet(a);
+		return 0;
+	}
+#endif
 
 	if (argc == 3 && strcmp(argv[1], "-b") == 0) {
 		long baud = atol(argv[2]);
@@ -348,12 +418,14 @@ static int tty_execute(void *args, int argc, char *argv[])
 			if (strcmp(argv[2], tty_modes[m]) == 0) {
 				a->mode = (tty_mode_t)m;
 				tty_pin(a, m >= TTY_MODE_RS_DPX1);
+				tty_quiet(a); /* DPX: a whole wait first */
 				return 0;
 			}
 		}
 	}
 
-	printf("usage: -b BAUD, -m STD/SPX1/SPX2/DPX1/DPX2, -stat\n");
+	printf("usage: -b BAUD, -m STD/SPX1/SPX2/DPX1/DPX2, %s-stat\n",
+	       TTY_DPX_AUTO ? "-a 0/1 (DPX auto direction), " : "");
 
 	return -1;
 }
@@ -373,6 +445,14 @@ int tty_register_node(char *name, tty_args_t *a)
 	tty_uart_t *u = TTY_UART(a->port);
 
 	tty_ports[a->port - 1] = a;
+
+	/* a seed of its own: two ports of a board (or two boards) must not swap in lock-step */
+#if TTY_DPX_AUTO
+	tty_dpx_init(&a->dpx,
+		     (uint16_t)((uintptr_t)a ^ ((uint16_t)a->port << 8) ^ (uint16_t)task_get_system_time()),
+		     tty_ms());
+	a->swaps = 0;
+#endif
 
 	u->mode = TTY_MODE_BRGH; /* 8N1, stopped */
 	u->sta = 0;

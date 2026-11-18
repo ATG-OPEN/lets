@@ -7,6 +7,9 @@
  * interrupt, which drops port 2's pin after the last bit, while this thread changes port 1's
  * pin as a task does. An interrupt between a task's read and write of LATF would put port 2's
  * pin back on (a transmitter left on); the test counts such lost updates and wants none.
+ *
+ * Then DPX auto direction on a fake clock: a DPX port that reads nothing swaps DPX1 <-> DPX2
+ * (and its pin) after 2 to 4 s, never while bytes come; `-a 0`, SPX and STD never swap.
  */
 
 #include <pthread.h>
@@ -20,6 +23,13 @@ volatile uint16_t fake_u1[5], fake_u2[5];
 volatile uint16_t LATF;
 volatile unsigned int _U1TXIF, _U1TXIE, _U1RXIF, _U1RXIE;
 volatile unsigned int _U2TXIF, _U2TXIE, _U2RXIF, _U2RXIE;
+
+static uint64_t fake_us;
+
+uint64_t task_get_system_time(void)
+{
+	return fake_us;
+}
 
 static pthread_mutex_t cpu;
 static _Thread_local unsigned int cpu_ipl;
@@ -133,6 +143,72 @@ static void test_shared_lat(void)
 	CHECK(lost == 0);
 }
 
+/* reads port 1 every tick (1.024 ms) for @ms ticks; a byte arrives every @every ms (0: none); returns the swaps */
+static unsigned int run(unsigned int ms, unsigned int every)
+{
+	uint16_t before = s1.swaps;
+	uint8_t b[8];
+
+	for (unsigned int t = 1; t <= ms; t++) {
+		fake_us += 1024u; /* the tty counts in 1.024 ms */
+
+		if (every != 0 && t % every == 0) {
+			/* what the receive interrupt does with a byte */
+			s1.rx[s1.rx_tail] = 'p';
+			s1.rx_tail = (uint8_t)((s1.rx_tail + 1u) % s1.rx_size);
+		}
+
+		tty_read(&s1, b, sizeof(b));
+	}
+
+	return (unsigned int)(uint16_t)(s1.swaps - before);
+}
+
+static void test_dpx(void)
+{
+	char *dpx1[] = {"ttyS1", "-m", "DPX1"};
+	char *spx1[] = {"ttyS1", "-m", "SPX1"};
+	char *std[] = {"ttyS1", "-m", "STD"};
+	char *fix[] = {"ttyS1", "-a", "0"};
+	char *unfix[] = {"ttyS1", "-a", "1"};
+
+	CHECK(tty_execute(&s1, 3, dpx1) == 0);
+	CHECK(s1.mode == TTY_MODE_RS_DPX1 && (LATF & PIN1));
+
+	/* nothing heard: the first swap within 2 .. 4 s, and the pin follows at once */
+	CHECK(run(1999, 0) == 0);
+	CHECK(run(2049, 0) == 1);
+	CHECK(s1.mode == TTY_MODE_RS_DPX2 && !(LATF & PIN1));
+
+	/* and on: 60 s of silence swaps every 2 .. 4 s */
+	unsigned int n = run(60000, 0);
+
+	CHECK(n >= 15 && n <= 30);
+
+	/* a ping a second (and its silence in between) never swaps */
+	CHECK(run(1, 1) == 0); /* the first byte */
+
+	tty_mode_t m = s1.mode;
+
+	CHECK(run(600000, 1000) == 0 && s1.mode == m);
+
+	/* -a 0 keeps it; -a 1 swaps again */
+	CHECK(tty_execute(&s1, 3, fix) == 0);
+	CHECK(run(30000, 0) == 0);
+	CHECK(tty_execute(&s1, 3, unfix) == 0);
+	CHECK(run(4100, 0) == 1);
+
+	/* SPX and STD never swap by themselves */
+	CHECK(tty_execute(&s1, 3, spx1) == 0);
+	CHECK(run(30000, 0) == 0 && s1.mode == TTY_MODE_RS_SPX1);
+	CHECK(tty_execute(&s1, 3, std) == 0);
+	CHECK(run(30000, 0) == 0 && s1.mode == TTY_MODE_STANDARD);
+
+	/* two ports registered alike do not share a seed */
+	CHECK(s1.dpx.state != s2.dpx.state);
+	printf("tty: DPX auto direction ok, %u swaps in 60 s of silence\n", n);
+}
+
 int main(void)
 {
 	pthread_mutexattr_t attr;
@@ -147,6 +223,7 @@ int main(void)
 
 	test_write();
 	test_shared_lat();
+	test_dpx();
 
 	printf(failures ? "test_tty: %d FAILED\n" : "test_tty: ok\n", failures);
 	return failures ? 1 : 0;

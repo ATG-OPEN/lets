@@ -62,7 +62,9 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   **Link mode prints the prompt (`<cwd>$ `) after every command** (since 8131f4a): programs on the
   other end use it as "command done".
 - **Optional nodes** (`opt/`): `gpa` (GPIO/ADC/DAC channel as a node; one native float per read or
-  write, in physical units), `tty` (non-blocking PIC24F UART, RS485 direction pin).
+  write, in physical units), `tty` (non-blocking PIC24F UART, RS485 direction pin; DPX1/DPX2 swap by
+  themselves after 2-4 s (pseudo-random per port, `opt/tty_dpx.h`) of receiving nothing, `-a 0` off,
+  `-stat` shows the swaps; `-DTTY_DPX_AUTO=0` builds it out: ~600 B code, 10 B RAM a port).
 - **Libraries** (`lib/`): `args` (argv, dotted paths such as `1.2.5`), `byte8` (framing + CRC16, up to
   250 data bytes), `ddata`, `pidlib`, `queue`, `ema_filter`, `medianfilter`, `uuid`.
 - **Build flags:** `TASKS_MAX_COUNT` (16), `VFS_NODES_MAX` (24), `MAX_BLOCK_COUNT` (32 heap
@@ -146,3 +148,7 @@ Other:
 - 2026-11-18 (branch `wdt-all`): every task watched by the scheduler (ready-wait default, hang named
   after the reset, `by:` the long call); watchdog hardware only behind four port hooks, PIC24 ones
   moved to `port/pic24/wdt.c`.
+- 2026-11-18: merged to main with `task_busy()` (flash drivers kick between page copies: an `ed`
+  rewrite of `/boot/rc` on a PIC24 no longer outlasts the ~2.1 s watchdog), tty transmit IRQ bits as
+  single bset/bclr (UART3/4 share IFS5/IEC5), and DPX auto direction in the tty (was a router
+  feature on a drn-router-mcu branch, now the port's).
