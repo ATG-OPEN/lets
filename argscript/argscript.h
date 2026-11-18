@@ -4,8 +4,6 @@
 #ifndef ARGSCRIPT_H
 #define ARGSCRIPT_H
 
-#include <stdint.h>
-
 /**
  * @file argscript.h
  * @brief argscript: a tiny line-based script language for the kernel.
