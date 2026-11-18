@@ -4,16 +4,11 @@ on:
   push:
   pull_request:
 
+# LETS runs on MCUs; the host build exists only to run the kernel's tests on a PC.
+# One Linux run is enough for that (the macOS runners were mostly unavailable).
 jobs:
   host:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    # GitHub's macOS machines are often busy; the macOS run is extra and does not fail the check.
-    # Linux decides pass or fail.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: build the host demo
