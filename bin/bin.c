@@ -318,7 +318,7 @@ static int bin_rm(void *args, int argc, char *argv[])
 	return 0;
 }
 
-static int bin_mv(void *args, int argc, char *argv[])
+static int __attribute__((unused)) bin_mv(void *args, int argc, char *argv[]) /* BIN_FILES 0: not in the table */
 {
 	if (argc != 3) {
 		return bin_bad();
@@ -328,7 +328,7 @@ static int bin_mv(void *args, int argc, char *argv[])
 }
 
 /* touch path: an empty file, or a RAM file outside a mounted file system */
-static int bin_touch(void *args, int argc, char *argv[])
+static int __attribute__((unused)) bin_touch(void *args, int argc, char *argv[]) /* BIN_FILES 0: not in the table */
 {
 	if (argc != 2) {
 		return bin_bad();
@@ -523,7 +523,7 @@ static int bin_echo(void *args, int argc, char *argv[])
 }
 
 /* cp from to: `to` may be a directory */
-static int bin_cp(void *args, int argc, char *argv[])
+static int __attribute__((unused)) bin_cp(void *args, int argc, char *argv[]) /* BIN_FILES 0: not in the table */
 {
 	if (argc != 3) {
 		return bin_bad();
@@ -644,7 +644,7 @@ static int bin_df(void *args, int argc, char *argv[])
 }
 
 /* mount [-f] [-t type] source path; no arguments: as df */
-static int bin_mount(void *args, int argc, char *argv[])
+static int __attribute__((unused)) bin_mount(void *args, int argc, char *argv[]) /* BIN_FILES 0: not in the table */
 {
 	const char *type = "tfs";
 	unsigned long flags = 0;
@@ -677,7 +677,7 @@ static int bin_mount(void *args, int argc, char *argv[])
 	return 0;
 }
 
-static int bin_umount(void *args, int argc, char *argv[])
+static int __attribute__((unused)) bin_umount(void *args, int argc, char *argv[]) /* BIN_FILES 0: not in the table */
 {
 	if (argc != 2) {
 		return bin_bad();
@@ -768,21 +768,45 @@ static void bin_prompt(void)
 	shell_write("$ ", 2);
 }
 
+/*
+ * Small boards (the 64 KB / 8 KB floor) leave out commands they do not use; the full set is the
+ * default:
+ *   BIN_DATE 0   no `date`, `uptime` and no node date (bin/date.c is not linked; clock_gettime()
+ *                and the rest of kernel/clock.c stay for programs)
+ *   BIN_TOP 0    no `top` and `kill` (bin/top.c, bin/kill.c and, if nothing else uses it, lines.c)
+ *   BIN_FILES 0  no `cp`, `mv`, `df`, `mount`, `umount`, `touch` (cat, ls, rm, mkdir, cd stay)
+ */
+#ifndef BIN_DATE
+#define BIN_DATE 1
+#endif
+#ifndef BIN_TOP
+#define BIN_TOP 1
+#endif
+#ifndef BIN_FILES
+#define BIN_FILES 1
+#endif
+
 const vfs_command_t vfs_commands[] = {
 	{"cat", bin_cat},	{"cd", bin_cd},
-	{"cp", bin_cp},		{"date", date_execute},
-	{"df", bin_df},		{"echo", bin_echo},
-	{"kill", kill_execute},		{"ls", bin_ls},
-	{"mkdir", bin_mkdir},	{"mount", bin_mount},
-	{"mv", bin_mv},
+#if BIN_DATE
+	{"date", date_execute},	{"uptime", date_uptime_execute},
+#endif
+#if BIN_TOP
+	{"kill", kill_execute},	{"top", top},
+#endif
+#if BIN_FILES
+	{"cp", bin_cp},		{"df", bin_df},
+	{"mount", bin_mount},	{"mv", bin_mv},
+	{"touch", bin_touch},	{"umount", bin_umount},
+#endif
+	{"echo", bin_echo},	{"ls", bin_ls},
+	{"mkdir", bin_mkdir},
 #ifndef SHELL_NO_PASSWORD
 	{"passwd", shell_passwd},
 #endif
 	{"pwd", bin_pwd},
 	{"reboot", reboot_execute},	{"rm", bin_rm},
 	{"std", vfs_std_execute}, {"sync", bin_sync},
-	{"top", top},		{"touch", bin_touch},
-	{"umount", bin_umount}, {"uptime", date_uptime_execute},
 #ifndef VFS_NO_REDIRECT
 	{"shell", shell_start},
 #endif
@@ -798,5 +822,9 @@ int vfs_bin_initialize(void)
 	shell_names_set(bin_names);
 	shell_prompt_set(bin_prompt);
 
+#if BIN_DATE
 	return date_initialize();
+#else
+	return 0;
+#endif
 }

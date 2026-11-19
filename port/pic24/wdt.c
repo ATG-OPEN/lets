@@ -35,7 +35,7 @@ task_reset_t port_wdt_reset_cause(uint16_t *raw)
 			       : TASK_RESET_OTHER;
 }
 
-#if defined(__dsPIC33C__) || defined(__dsPIC33E__) && defined(_WDTCONL_ON_POSITION)
+#if defined(_WDTCONL_ON_POSITION) && !defined(_RCON_SWDTEN_POSITION) /* by the registers the chip has */
 /* dsPIC33C (dsPIC33CK, dsPIC33CH): the watchdog is WDTCONL.ON (FWDTEN = ON_SW in the config bits),
    fed by writing the key 0x5743 to WDTCONH (WDTCLRKEY); RCON has no SWDTEN */
 void port_wdt_start(uint16_t ms)

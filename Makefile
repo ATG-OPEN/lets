@@ -91,7 +91,7 @@ test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/te
 	./build/test_tty
 	./build/test_tty_dpx
 	$(CC) $(CFLAGS) $(PRELUDE) -Werror -fsyntax-only -DTTY_PORTS=2 -DTTY_DPX_AUTO=0 -Itests/pic24 port/pic24/tty.c
-	for f in $(KERNEL); do $(CC) $(CFLAGS) $(NOFS) $(PRELUDE) -Werror -fsyntax-only -DVFS_PROC=0 -DVFS_POLL=0 $$f || exit 1; done
+	for f in $(KERNEL); do $(CC) $(CFLAGS) $(NOFS) $(PRELUDE) -Werror -fsyntax-only -DVFS_PROC=0 -DVFS_POLL=0 -DBIN_DATE=0 -DBIN_TOP=0 -DBIN_FILES=0 $$f || exit 1; done
 	$(MAKE) -C lib/test
 
 SOURCES = $(shell git ls-files '*.c' '*.h' 2>/dev/null)
