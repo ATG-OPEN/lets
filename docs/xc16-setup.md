@@ -31,6 +31,10 @@ Into `XC16/include/` (copied from this repository's `include/`, which stays the 
 | `lets/posix.h` | the declarations themselves (the kernel's `lib/posix.h` includes it too) |
 | `lets/libc.h` | which C library is in use (XC16, newlib, a PC) |
 | `lets-app.h` | `lets_spawn()` and, for board code, `LETS_COMMAND()` |
+| `sys/reboot.h` | `reboot()` |
+| `lets/task.h` | for programs that start tasks themselves (argscript, lines, reboot): `task_create()`, `task_alloc()`, `task_stopping()`, `shell_wait()` |
+| `lets/node.h` | for programs that offer a node or a command (`date`): `vfs_handler_t`, `vfs_node_create()`, `vfs_register_app()` |
+| `lets/lines.h`, `lets/args.h` | LETS's libraries for commands: output a line a call (`top`, `ed`), argv and dotted paths |
 | `lets/INSTALLED` | the list of files above (for `--uninstall`) |
 
 Each of the standard-named files includes `lets/posix.h`; where the C library has the header too
@@ -135,3 +139,32 @@ vfs_register_app("/opt/echo", LETS_COMMAND_OF(echo_main));
 
 Why a step and not a loop in `main()`: LETS tasks are cooperative (one stack), so `main()` returns
 after it has started the task; `lets_spawn()` is the one LETS-specific call a program makes.
+
+## LETS's own programs
+
+The commands of `bin/` and argscript are written the same way (before: relative includes of
+`../lib/posix.h`, `../vfs/vfs.h`, `../kernel/task.h`, `lines.h`, `shell.h`, `../lib/args.h`):
+
+| Program | Includes now (besides its own header) |
+|---|---|
+| `date` | `<sys/time.h> <sys/timex.h> <time.h> <lets/node.h> <limits.h> <stdio.h> <string.h>` (it offers the node `date`) |
+| `ed` | `<fcntl.h> <sys/ioctl.h> <sys/stat.h> <unistd.h> <stdbool.h> <stdio.h> <stdlib.h> <string.h> <lets/lines.h>` |
+| `kill` | `<fcntl.h> <signal.h> <unistd.h> <stdio.h> <string.h>` |
+| `top` | `<fcntl.h> <sys/stat.h> <stdio.h> <stdlib.h> <string.h> <lets/lines.h>` |
+| `lines` (library) | `<unistd.h> <stdio.h> <stdlib.h> <string.h> <lets/lines.h> <lets/task.h>` |
+| `reboot` | `<sys/reboot.h> <unistd.h> <stdbool.h> <lets/task.h>` |
+| argscript | `<fcntl.h> <unistd.h> <stdio.h> <stdlib.h> <string.h> <stdbool.h> <lets/task.h> <lets/args.h>` |
+
+The code did not change: the objects are byte for byte the same size (XC16, PIC24FJ1024GA606).
+
+What keeps the kernel's headers, and why:
+
+- `bin/bin.c`: the table of built-in commands (`vfs_command_t`, `vfs_bin_initialize()`), the file
+  commands that format a disk (`vfs_tfs_mkfs`) and the shell's own commands (`std`, `passwd`): it
+  is the kernel's command registry, not a program.
+- `bin/shell.c`: the login and init of LETS (`task_streams()`, `vfs_stream()`, `vfs_peer_changed()`,
+  the node table for Tab completion): it is what runs programs.
+- `opt/` (`gpa`, `tty`) and `port/`: drivers below the POSIX line; they create nodes and handle
+  interrupts with `vfs/vfs.h` and `kernel/task.h`, as Linux drivers use the kernel's headers.
+- Board code (`main.c`, board files): it registers nodes, programs and file systems (`vfs/vfs.h`).
+
