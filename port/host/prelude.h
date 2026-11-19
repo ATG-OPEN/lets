@@ -22,6 +22,23 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+/* the PC's own declarations of what LETS renames below, read under their real names first: a
+   program's later #include of them (through lets/include) then adds nothing */
+#include <time.h>
+#include <signal.h>
+#include <sys/time.h>
+#include <poll.h>
+#include <dirent.h>
+#include <sys/ioctl.h>
+#include <sys/statvfs.h>
+#if defined(__has_include)
+#if __has_include(<sys/timex.h>)
+#include <sys/timex.h>
+#endif
+#if __has_include(<sys/reboot.h>)
+#include <sys/reboot.h>
+#endif
+#endif
 
 #define open   k_open
 #define read   k_read
@@ -80,6 +97,10 @@ int k_system(const char *input);
 int k_printf(const char *format, ...);
 void *k_malloc(size_t size);
 void k_free(void *ptr);
+
+/* lets/include's headers add LETS's declarations from here on, under the k_ names */
+#define LETS_PRELUDE_RENAMED 1
+#include "../../include/lets/posix.h"
 
 /* XC16 puts the replacements in named sections; Mach-O wants "segment,section" names */
 #if defined(__APPLE__)

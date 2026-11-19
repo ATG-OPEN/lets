@@ -9,9 +9,11 @@
  * memory between commands.
  */
 
-#include "lines.h"
+#include <lets/lines.h>
 
-#include "../lib/posix.h"
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
 
 #include <unistd.h>
 #include <stdbool.h>

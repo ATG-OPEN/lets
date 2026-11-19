@@ -13,14 +13,14 @@
 #
 # Into XC16's include/ it copies (new files, listed in include/lets/INSTALLED):
 #   fcntl.h poll.h dirent.h sys/stat.h sys/time.h sys/timex.h sys/mount.h sys/ioctl.h sys/statvfs.h
-#   sys/types.h lets/libc.h lets/posix.h lets-app.h            (from this repository's include/)
+#   sys/types.h sys/reboot.h lets/libc.h lets/posix.h lets-app.h            (from this repository's include/)
 # and appends `#include <lets/posix.h>` to XC16's own unistd.h, time.h and signal.h (between marker
 # lines; the original is kept as FILE.lets-orig). Nothing else of the compiler is changed: no .gld
 # (LETS needs nothing of them, docs/xc16-setup.md). Running it again changes only what differs.
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 SRC=$HERE/include
-NEW="fcntl.h poll.h dirent.h sys/stat.h sys/time.h sys/timex.h sys/mount.h sys/ioctl.h sys/statvfs.h sys/types.h lets/libc.h lets/posix.h lets-app.h"
+NEW="fcntl.h poll.h dirent.h sys/stat.h sys/time.h sys/timex.h sys/mount.h sys/ioctl.h sys/statvfs.h sys/types.h sys/reboot.h lets/libc.h lets/posix.h lets/task.h lets/node.h lets/lines.h lets/args.h lets-app.h"
 PATCH="unistd.h time.h signal.h"
 BEGIN='/* LETS (lets/tools/xc16-install.sh): the POSIX calls LETS adds - begin */'
 END='/* LETS (lets/tools/xc16-install.sh) - end */'

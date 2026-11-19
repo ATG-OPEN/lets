@@ -3,11 +3,10 @@
 
 /* See lines.h. */
 
-#include "lines.h"
-#include "shell.h"
+#include <lets/lines.h>
 
-#include "../kernel/task.h" /* task_create(): a full stream is written on by a task */
-#include "../lib/posix.h"
+#include <lets/task.h>
+#include <unistd.h>
 
 #include <stdio.h>
 #include <stdlib.h>

@@ -2,10 +2,10 @@
 /* Copyright (c) 2026 ATG */
 
 #include "reboot.h"
-#include "shell.h"
 
-#include "../kernel/task.h" /* task_create(): the wait is a task */
-#include "../lib/posix.h"
+#include <lets/task.h>
+#include <sys/reboot.h>
+#include <unistd.h>
 
 #include <stdbool.h>
 

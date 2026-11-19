@@ -3,8 +3,10 @@
 
 #include "date.h"
 
-#include "../lib/posix.h"
-#include "../vfs/vfs.h" /* vfs_node_create(): the node `date` */
+#include <sys/time.h>
+#include <sys/timex.h>
+#include <time.h>
+#include <lets/node.h>
 
 #include <limits.h>
 

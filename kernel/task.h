@@ -33,6 +33,7 @@
 #define TASK_H
 
 #include <stdint.h>
+#include "../include/lets/task.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <unistd.h> /* pid_t: kill() */
@@ -86,8 +87,8 @@ typedef struct {
 	uint8_t cwd;
 } task_streams_t;
 
-/** One slot of the task table. */
-typedef struct {
+/** One slot of the task table (task_t: lets/task.h). */
+struct task {
 	/** The task function: gets its argument and the current time in us. */
 	int (*entry)(void *arg, uint64_t system_time);
 	void *arg;		/**< Argument passed to entry(), owned by the task. */
@@ -100,7 +101,7 @@ typedef struct {
 	uint16_t deadline;
 	uint32_t alive; /**< End of its last call (or its last task_alive()), in us, wraps. */
 #endif
-} task_t;
+};
 
 /** Why the chip last reset: task_reset_reason(). */
 typedef enum {

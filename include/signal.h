@@ -12,7 +12,7 @@
 #include_next <signal.h>
 #endif
 
-#if !defined(PORT_CORTEX_M_PRELUDE_H) || defined(LETS_PRELUDE_RENAMED)
+#if !(defined(PORT_CORTEX_M_PRELUDE_H) || defined(PORT_HOST_PRELUDE_H)) || defined(LETS_PRELUDE_RENAMED)
 #include "lets/posix.h"
 #endif
 

@@ -78,26 +78,7 @@
 #define VFS_BOOT_RC "ttyS1 -b 9600\nstd ttyS1\n"
 #endif
 
-/** What a node can do. Any handler may be NULL. Each gets the node's args. */
-typedef struct {
-	/** Called by open(); the result is ignored. */
-	int (*open_handler)(void *args, int flags);
-	/** Writes @p length bytes; returns the bytes written or -1. */
-	int (*write_handler)(void *args, void *buffer, unsigned int length);
-	/** Reads up to @p length bytes; returns the bytes read or -1. */
-	int (*read_handler)(void *args, void *buffer, unsigned int length);
-	/** Moves the read position, as lseek(). */
-	int (*lseek_handler)(void *args, off_t offset, int whence);
-	/** Called by close() of the last handle on the node. */
-	int (*close_handler)(void *args);
-	/** Runs the node as a command (see system()). */
-	int (*execute_handler)(void *args, int argc, char *argv[]);
-	/**
-	 * Optional: which of @p events (POLLIN, POLLOUT) the node is ready for now, for poll(); a
-	 * node without one is always ready. Called often while a task waits: keep it short.
-	 */
-	int (*poll_handler)(void *args, int events);
-} vfs_handler_t;
+#include "../include/lets/node.h" /* vfs_handler_t, vfs_node_create(), vfs_register_app() */
 
 /** One entry of the node table. */
 typedef struct {
@@ -230,7 +211,7 @@ int vfs_resolve(const char *path, vfs_path_t *p);
  *
  * @return The node index, or -1.
  */
-int vfs_node_create(const char *path, bool hidden, void *args, const vfs_handler_t *handlers);
+/* vfs_node_create(): lets/node.h */
 
 /**
  * @brief Registers a command at @p path; a bare name goes to /bin.
@@ -240,7 +221,7 @@ int vfs_node_create(const char *path, bool hidden, void *args, const vfs_handler
  * It takes a node of the table and no heap.
  * @return 0 or -1.
  */
-int vfs_register_app(const char *path, int (*execute_handler)(void *args, int argc, char *argv[]));
+/* vfs_register_app(): lets/node.h */
 
 /** @brief Makes block device @p blk the node /dev/@p name. @return 0 or -1. */
 int vfs_blk_register(const char *name, vfs_blk_t *blk);

@@ -103,6 +103,12 @@ int mkdir(const char *path, mode_t mode);
 int mount(const char *source, const char *target, const char *type, unsigned long flags,
 	  const void *data);
 
+#ifndef RB_AUTOBOOT
+#define RB_AUTOBOOT 0x01234567 /**< reboot()'s cmd, as Linux's <sys/reboot.h> (not used) */
+#endif
+/** @brief Writes back what is held, then resets the board (the port's reset; kernel/task.c). */
+int reboot(int cmd) __attribute__((noreturn));
+
 /** @brief Unmounts the file system at @p target (no file may be open on it). @return 0 or -1. */
 int umount(const char *target);
 

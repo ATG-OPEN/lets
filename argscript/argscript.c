@@ -25,9 +25,10 @@
 
 #include "argscript.h"
 
-#include "../kernel/task.h" /* task_create(), task_alloc(), task_stopping(): a script is a task */
-#include "../lib/args.h"
-#include "../lib/posix.h"
+#include <lets/task.h>
+#include <lets/args.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <unistd.h>
 #include <stdio.h>

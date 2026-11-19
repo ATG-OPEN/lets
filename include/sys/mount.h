@@ -8,11 +8,12 @@
 #define LETS_INCLUDE_SYS_MOUNT_H
 
 #include "../lets/libc.h"
-#if (!defined(__XC16__) && !defined(__NEWLIB__))
+/* not macOS's: its mount() is another call (and the header defines ALIGN, mount_t) */
+#if !defined(__XC16__) && !defined(__NEWLIB__) && !defined(__APPLE__)
 #include_next <sys/mount.h>
 #endif
 
-#if !defined(PORT_CORTEX_M_PRELUDE_H) || defined(LETS_PRELUDE_RENAMED)
+#if !(defined(PORT_CORTEX_M_PRELUDE_H) || defined(PORT_HOST_PRELUDE_H)) || defined(LETS_PRELUDE_RENAMED)
 #include "../lets/posix.h"
 #endif
 

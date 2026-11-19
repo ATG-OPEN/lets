@@ -10,9 +10,10 @@
  */
 
 #include "top.h"
-#include "lines.h"
+#include <lets/lines.h>
 
-#include "../lib/posix.h"
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include <string.h>
 #include <stdio.h>
