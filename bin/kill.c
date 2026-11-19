@@ -10,7 +10,6 @@
 
 #define KILL_IDS 100u /* /proc/0 .. /proc/99: the task slots there can be */
 
-#if VFS_PROC
 /* the task called @p name: its ID, found in its row of /proc (as `top` shows it), or -1 */
 static int kill_find(const char *name)
 {
@@ -34,10 +33,6 @@ static int kill_find(const char *name)
 
 	return -1;
 }
-#else
-/* a board without /proc (VFS_PROC 0) stops the task by its name, in the kernel */
-int task_stop_byname(char *name);
-#endif
 
 int kill_execute(void *args, int argc, char *argv[])
 {
@@ -46,13 +41,9 @@ int kill_execute(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-#if VFS_PROC
 	int id = kill_find(argv[1]);
 
 	if (id < 0 || kill((pid_t)id, SIGTERM) < 0) {
-#else
-	if (task_stop_byname(argv[1]) < 0) {
-#endif
 		printf("not found\n");
 		return -1;
 	}

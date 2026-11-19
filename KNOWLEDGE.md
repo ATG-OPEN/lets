@@ -100,7 +100,7 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
 
 - `kernel/` - scheduler (`task.c`), heap (`alloc.c`).
 - `bin/` - the programs: shell and commands (`shell.c`, `bin.c` - the command table and the file
-  commands, `top.c`, `kill.c`, `date.c`, `reboot.c`, `sys.c`, `ed.c`, `lines.c`).
+  commands, `top.c`, `kill.c`, `date.c`, `reboot.c`, `ed.c`, `lines.c`).
 - `vfs/` - node table (`node.c`), tree (`vfs.c`), POSIX calls (`posix.c`), RAM files of /tmp (`tmp.c`),
   tiny power-loss-safe file system (`tfs.c`, `tfsvfs.c`), `onefs.c`, memory drivers
   `dev/` (25xx EEPROM, 23xx SRAM, SST25 flash, PIC24FJ flash, RAM disk, partitions).

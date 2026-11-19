@@ -15,7 +15,7 @@ PRELUDE = -include port/host/prelude.h
 
 # the kernel, its shell and vfs without tfs (VFS_NO_TFS, as on a small MCU) ...
 KERNEL  = kernel/task.c kernel/clock.c kernel/alloc.c lib/args.c $(wildcard bin/*.c) \
-          vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/proc.c vfs/onefs.c
+          vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/proc.c vfs/sys.c vfs/onefs.c
 NOFS    = -DVFS_NO_TFS
 
 # ... and with tfs and the memory drivers
@@ -49,9 +49,6 @@ build/test_sleep: tests/test_sleep.c $(KERNEL) | build
 build/test_proc: tests/test_proc.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) tests/test_proc.c $(KERNEL) -o $@
 
-build/test_proc0: tests/test_proc.c $(KERNEL) | build
-	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DVFS_PROC=0 tests/test_proc.c $(KERNEL) -o $@
-
 build/test_proc_fd: tests/test_proc.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DVFS_FD_TASK=1 tests/test_proc.c $(KERNEL) -o $@
 
@@ -82,12 +79,11 @@ LIBS    = $(wildcard lib/*.c) $(wildcard opt/*.c)
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done
 
-test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/test_proc0 build/test_proc_fd build/test_vfs build/as_test build/test_nrf52 build/test_tty build/test_tty_dpx libs
+test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/test_proc_fd build/test_vfs build/as_test build/test_nrf52 build/test_tty build/test_tty_dpx libs
 	./build/test_kernel
 	./build/test_sleep
 	./build/test_wdt
 	./build/test_proc
-	./build/test_proc0
 	./build/test_proc_fd
 	./build/test_vfs
 	./build/as_test
@@ -95,6 +91,7 @@ test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/te
 	./build/test_tty
 	./build/test_tty_dpx
 	$(CC) $(CFLAGS) $(PRELUDE) -Werror -fsyntax-only -DTTY_PORTS=2 -DTTY_DPX_AUTO=0 -Itests/pic24 port/pic24/tty.c
+	for f in $(KERNEL); do $(CC) $(CFLAGS) $(NOFS) $(PRELUDE) -Werror -fsyntax-only -DVFS_PROC=0 -DVFS_POLL=0 $$f || exit 1; done
 	$(MAKE) -C lib/test
 
 SOURCES = $(shell git ls-files '*.c' '*.h' 2>/dev/null)
@@ -107,6 +104,7 @@ docs: | build
 
 clean:
 	rm -rf build
+	for f in $(KERNEL); do $(CC) $(CFLAGS) $(NOFS) $(PRELUDE) -Werror -fsyntax-only -DVFS_PROC=0 -DVFS_POLL=0 $$f || exit 1; done
 	$(MAKE) -C lib/test clean
 
 .PHONY: all libs test format docs clean

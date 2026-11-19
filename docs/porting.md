@@ -51,7 +51,7 @@ is `SHELL_PASSWORD_DEFAULT`, **"123456", which everyone knows**: put `passwd WOR
 board's startup script. `passwd -` switches it off (for a board whose shell is driven by a
 program that does not log in); `-DSHELL_PASSWORD_DEFAULT=\"\"` builds without a default and
 `-DSHELL_NO_PASSWORD` without the password at all. It guards the shells only, and goes in clear:
-the node `sys` (`bin/sys.c`), or a network service that can write `/boot/rc` or `/home`, runs
+the node `sys` (`vfs/sys.c`), or a network service that can write `/boot/rc` or `/home`, runs
 commands without it, so keep those off a link a stranger can reach.
 
 ## XC16

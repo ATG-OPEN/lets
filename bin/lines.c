@@ -6,8 +6,8 @@
 #include "lines.h"
 #include "shell.h"
 
-#include "../kernel/task.h"
-#include "../vfs/vfs.h"
+#include "../kernel/task.h" /* task_create(): a full stream is written on by a task */
+#include "../lib/posix.h"
 
 #include <stdio.h>
 #include <stdlib.h>

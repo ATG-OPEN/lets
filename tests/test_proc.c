@@ -2,8 +2,7 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * The POSIX line on a PC: what a program sees of the kernel through /proc (VFS_PROC 1) or
- * through vfs_proc_line() (VFS_PROC 0, built a second time), kill(), reboot() through the port's
+ * The POSIX line on a PC: what a program sees of the kernel through /proc, kill(), reboot() through the port's
  * hook, getcwd() / chdir(), isatty(), and `top` / `top mem` / `kill` as before: the same lines in
  * the same columns.
  */
@@ -117,16 +116,12 @@ static int slot_of(const char *name)
 	char row[96];
 
 	for (int id = 0; id < TASKS_MAX_COUNT; id++) {
-#if VFS_PROC
 		char path[16];
 		snprintf(path, sizeof(path), "/proc/%d", id);
 		int fd = open(path, O_RDONLY, 0);
 		int n = (fd < 0) ? -1 : read(fd, row, sizeof(row) - 1);
 		close(fd);
 		row[n < 0 ? 0 : n] = '\0';
-#else
-		int n = vfs_proc_line(2u + (unsigned int)id, row, sizeof(row));
-#endif
 		if (n > 0 && strncmp(row + 4, name, strlen(name)) == 0 && row[4 + strlen(name)] == ' ') {
 			return id;
 		}
@@ -157,7 +152,6 @@ static int checks(void *arg, uint64_t now)
 		int fd = open("/proc/stat", O_RDONLY, 0);
 		int n = (fd < 0) ? -1 : read(fd, buf, sizeof(buf));
 		close(fd);
-#if VFS_PROC
 		CHECK(n > 30 && strncmp(buf, "up 0d 00:00:01  tasks 3  loop ", 30) == 0);
 		fd = open("/proc/mem", O_RDONLY, 0);
 		CHECK(fd >= 0 && read(fd, buf, 5) == 5 && strncmp(buf, "heap ", 5) == 0 && close(fd) == 0);
@@ -169,9 +163,6 @@ static int checks(void *arg, uint64_t now)
 		buf[(n < 0) ? 0 : n] = '\0';
 		CHECK(close(fd) == 0 && strcmp(buf, "proc /proc proc\n") == 0);
 		CHECK(statvfs("/proc", &sv) == -1 && statvfs("/nothing", &sv) == -1);
-#else
-		CHECK(n == -1); /* no /proc */
-#endif
 		CHECK(vfs_proc_line(0, buf, sizeof(buf)) > 0 && strncmp(buf, "up 0d 00:00:01  tasks 3  loop ", 30) == 0);
 		CHECK(strstr(buf, "  reset -\n") != NULL);
 		CHECK(vfs_proc_line(1, buf, sizeof(buf)) > 0 && strncmp(buf, "heap ", 5) == 0 &&
@@ -185,10 +176,8 @@ static int checks(void *arg, uint64_t now)
 		CHECK(kill(w, 0) == 0 && kill(w, SIGTERM) == 0 && kill(w, 0) == -1 && kill(w, SIGTERM) == -1);
 		CHECK(slot_of("worker") == -1 && vfs_proc_line(2u + (unsigned int)w, buf, sizeof(buf)) == 0);
 		CHECK(kill(-1, 0) == -1 && kill(TASKS_MAX_COUNT, 0) == -1);
-#if VFS_PROC
 		snprintf(buf, sizeof(buf), "/proc/%d", w);
 		CHECK(open(buf, O_RDONLY, 0) < 0 && open("/proc/x1", O_RDONLY, 0) < 0); /* a free slot */
-#endif
 
 		/* a task that ends leaves its handles open, or (VFS_FD_TASK) they are closed with it */
 		task_create("opener", worker, NULL);

@@ -21,12 +21,6 @@
 #define TOP_HEADER " ID NAME            STATE   RAM    LAST     MAX  PERIOD   CPU\n"
 #define TOP_IDS	   100u /* /proc/0 .. /proc/99: the task slots there can be */
 
-#if !VFS_PROC
-/* a board without the /proc mount (VFS_PROC 0, vfs.h) asks the kernel for the same text */
-int vfs_proc_line(unsigned int line, char *buf, unsigned int max);
-void vfs_proc_mem(void);
-#endif
-
 typedef struct {
 	lines_t lines;
 	uint8_t step; /* 0 stat, 1 meminfo, 2 the header, 3 + k task slot k */
@@ -35,7 +29,6 @@ typedef struct {
 /* line @p i of `top` but the header (0 stat, 1 meminfo, 2 + k slot k): its length, 0 or -1 */
 static int top_line(unsigned int i, char *piece, unsigned int max)
 {
-#if VFS_PROC
 	char path[16];
 
 	if (i < 2u) {
@@ -50,9 +43,6 @@ static int top_line(unsigned int i, char *piece, unsigned int max)
 	close(fd);
 
 	return (i - 2u >= TOP_IDS && i >= 2u) ? -1 : n;
-#else
-	return vfs_proc_line(i, piece, max + 1u);
-#endif
 }
 
 static unsigned int top_next(lines_t *l, char *piece, unsigned int max)
@@ -83,7 +73,6 @@ int top(void *args, int argc, char *argv[])
 	(void)args;
 
 	if (argc == 2 && strcmp(argv[1], "mem") == 0) {
-#if VFS_PROC
 		char buf[32];
 		int fd = open("/proc/mem", O_RDONLY, 0);
 		int n;
@@ -93,11 +82,6 @@ int top(void *args, int argc, char *argv[])
 		}
 
 		return close(fd);
-#else
-		vfs_proc_mem();
-
-		return 0;
-#endif
 	}
 
 	if (argc != 1) {

@@ -479,10 +479,10 @@ int vfs_tmp_create(const vfs_path_t *p);
  * /proc/stat, 1 /proc/meminfo, 2 + k /proc/k (the task in slot k).
  * @return Its length, 0 for a free slot, -1 past the last slot.
  */
+#if VFS_PROC
 int vfs_proc_line(unsigned int line, char *buf, unsigned int max);
+#endif
 
-/** @brief Prints /proc/mem (`top mem`) to stdout: for a board without /proc (VFS_PROC 0). */
-void vfs_proc_mem(void);
 
 #if VFS_PROC
 /** /proc as a file system type, mounted at /proc by vfs_initialize() (VFS_PROC, 1 by default). */

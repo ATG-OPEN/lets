@@ -13,8 +13,7 @@
 #include "top.h"
 #include "lines.h"
 
-#include "../vfs/vfs.h"
-#include "../vfs/tmp.h"
+#include "../vfs/vfs.h" /* the command table (vfs_command_t), VFS_HOME, VFS_PATH_MAX */
 #include "../kernel/task.h"
 
 #include <unistd.h>

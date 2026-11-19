@@ -16,8 +16,8 @@
  *
  * With VFS_PROC (1, the default) it is a file system type mounted at /proc by
  * vfs_initialize(); a file's text is made when it is opened and kept until it is closed, so a
- * read goes on where the last one stopped. VFS_PROC 0 leaves the mount out, for a board short of
- * flash: `top` then takes its lines from vfs_proc_line() and vfs_proc_mem(), the same text.
+ * read goes on where the last one stopped. VFS_PROC 0 leaves it out: `top`, `kill` and `df` then
+ * have nothing to read.
  */
 
 #include "vfs.h"
@@ -29,6 +29,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <unistd.h>
+
+#if VFS_PROC
 
 /* -------------------------------------------------------------------------- */
 /* text: counted when buf is NULL */
@@ -263,7 +265,6 @@ static void proc_meminfo(proc_text_t *l)
 	}
 }
 
-#if VFS_PROC
 /* printf() into the text (counted when it has no buffer) */
 static void proc_printf(proc_text_t *t, const char *format, ...)
 {
@@ -281,10 +282,6 @@ static void proc_printf(proc_text_t *t, const char *format, ...)
 		t->n = (t->n > t->max) ? t->max : t->n;
 	}
 }
-#else
-/* no /proc: `top mem` prints it (vfs_proc_mem()) */
-#define proc_printf(t, ...) printf(__VA_ARGS__)
-#endif
 
 /* `top mem`: the heap's blocks, the stack, the reset register, the watched tasks */
 static void proc_mem(proc_text_t *l)
@@ -357,7 +354,6 @@ int vfs_proc_line(unsigned int line, char *buf, unsigned int max)
 	return proc_line(&t, line);
 }
 
-#if VFS_PROC
 /* /proc/mem in @p buf, or counted (NULL, room 0xFFFF) */
 static int proc_mem_text(char *buf, unsigned int max)
 {
@@ -368,15 +364,7 @@ static int proc_mem_text(char *buf, unsigned int max)
 
 	return (int)t.n;
 }
-#else
-void vfs_proc_mem(void)
-{
-	proc_mem(NULL);
-	printf("\n");
-}
-#endif
 
-#if VFS_PROC
 
 /* /proc/mounts, as Linux's: "source path type" a line, each mounted file system */
 static void proc_mounts(proc_text_t *t)

@@ -185,7 +185,7 @@ shell -t < ttyS1 > ttyS1    a shell of its own: see kernel.md
 `>` means "not a terminal": lines end in `\n`. `-DVFS_NO_REDIRECT` leaves this and the `shell` command
 out, for a full flash. Differences from Linux are in [linux.md](linux.md).
 
-The node `sys` (bin/sys.c, `sys_initialize()`) is a command line as a file: `echo df > sys` runs the
+The node `sys` (vfs/sys.c, `sys_initialize()`) is a command line as a file: `echo df > sys` runs the
 line when the file is closed, as a task, and `cat sys` gives what it printed.
 
 `top` shows a running script under its name and `kill blink` stops it. Words after the name are

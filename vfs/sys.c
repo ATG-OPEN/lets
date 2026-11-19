@@ -3,8 +3,8 @@
 
 #include "sys.h"
 
+#include "vfs.h"
 #include "../kernel/task.h"
-#include "../vfs/vfs.h"
 
 #include <stdlib.h>
 #include <string.h>

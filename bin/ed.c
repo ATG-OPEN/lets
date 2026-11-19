@@ -11,9 +11,10 @@
 
 #include "lines.h"
 
-#include "../vfs/vfs.h"
+#include "../lib/posix.h"
 
 #include <unistd.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

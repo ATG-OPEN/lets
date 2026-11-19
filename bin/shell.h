@@ -67,7 +67,7 @@ void shell_wait(task_t *t);
  * of the word is kept in RAM. -DSHELL_NO_PASSWORD leaves it out.
  *
  * It guards what a shell reads, nothing else: the word goes in clear over the link, and
- * whatever else runs commands or writes files is outside it (the node `sys` of bin/sys.c runs
+ * whatever else runs commands or writes files is outside it (the node `sys` of vfs/sys.c runs
  * a line written to it; a service that can write /boot/rc or a script in /home runs it at the
  * next boot or call). Keep those off a link a stranger can reach. A new `passwd` does not log
  * out a shell that was given the old word.

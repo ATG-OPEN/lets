@@ -4,8 +4,8 @@
 #include "reboot.h"
 #include "shell.h"
 
-#include "../kernel/task.h"
-#include "../vfs/vfs.h"
+#include "../kernel/task.h" /* task_create(): the wait is a task */
+#include "../lib/posix.h"
 
 #include <stdbool.h>
 
