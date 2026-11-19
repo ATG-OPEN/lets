@@ -25,10 +25,9 @@
 
 #include "argscript.h"
 
-#include "../kernel/task.h"
-#include "../kernel/alloc.h"
+#include "../kernel/task.h" /* task_create(), task_alloc(), task_stopping(): a script is a task */
 #include "../lib/args.h"
-#include "../vfs/vfs.h"
+#include "../lib/posix.h"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -77,18 +76,20 @@ typedef unsigned int (*as_reader_t)(as_state_t *s, uint16_t at, char *buf, unsig
 struct as_state {
 	as_reader_t read; /* as_read_text() or as_read_file() */
 	const char *src;  /* the source in memory (a string in flash) */
-	as_var_t *var;	 /* the variables: one heap block the task owns, NULL while there are none */
+	as_var_t *var;	 /* the variables: one heap block the task owns, NULL while there are none,
+			    or (`run`) the copy at the end of this block */
 	uint16_t pos;	 /* next line */
 	uint16_t line;	 /* current line, for while and errors */
 	uint32_t wait;	 /* ms left to sleep */
 	int result;	 /* $? */
 	uint8_t depth;	 /* open blocks */
 	uint8_t vars;	 /* entries in var */
-	uint8_t cwd;	 /* a file: the directory its path is relative to */
 	uint8_t stalled; /* reads in a row the file could not be opened for */
 	as_block_t block[ARGSCRIPT_DEPTH];
-	char path[]; /* the file */
+	char path[]; /* the file, from / (`run`: the variables' copy after it) */
 };
+
+#define AS_PATH_MAX 64u /* the longest working directory a relative script path is put after */
 
 /* one script line runs to the end within a task call, so all scripts share these */
 static char as_raw[ARGSCRIPT_LINE_SIZE];
@@ -165,6 +166,24 @@ static bool as_number(const char *t, float *v)
 }
 
 /* ------------------------------- variables -------------------------------- */
+/* the size of the state with its path (a script `run` keeps its variables after it) */
+static size_t as_size(const as_state_t *s)
+{
+	return sizeof(as_state_t) + ((s->src == NULL) ? strlen(s->path) + 1u : 0u);
+}
+
+#if ARGSCRIPT_VARS > 0
+/* frees the variables' block: not the copy `run` put in the state's own block */
+static void as_var_free(as_state_t *s)
+{
+	if ((char *)s->var != (char *)s + as_size(s)) {
+		free(s->var);
+	}
+}
+#else
+#define as_var_free(s) ((void)(s)) /* no variables */
+#endif
+
 /* the variable `name`; with `create`, a new empty one when there is none */
 static as_var_t *as_var(as_state_t *s, const char *name, bool create)
 {
@@ -198,7 +217,7 @@ static as_var_t *as_var(as_state_t *s, const char *name, bool create)
 
 	if (s->var != NULL) {
 		memcpy(v, s->var, s->vars * sizeof(as_var_t));
-		free(s->var);
+		as_var_free(s);
 	}
 
 	s->var = v;
@@ -236,17 +255,10 @@ static unsigned int as_read_text(as_state_t *s, uint16_t at, char *buf, unsigned
 	return k;
 }
 
-/* the file: opened for each read, in the directory the script started in */
+/* the file: opened for each read, by the path it had where the script started */
 static unsigned int as_read_file(as_state_t *s, uint16_t at, char *buf, unsigned int n)
 {
-	task_streams_t *ts = task_streams();
-	uint8_t cwd = ts->cwd;
-
-	ts->cwd = s->cwd;
-
 	int fd = open(s->path, O_RDONLY, 0);
-
-	ts->cwd = cwd;
 
 	/* gone, or no heap for the handle now: counted, as_task() tries again */
 	s->stalled = (fd < 0) ? (uint8_t)(s->stalled + 1u) : 0u;
@@ -648,8 +660,10 @@ static int as_run(as_state_t *s, char *p)
 		return as_error(s, "bad argument");
 	}
 
-	size_t size = sizeof(as_state_t) + ((s->src == NULL) ? strlen(s->path) + 1u : 0u);
-	as_state_t *c = malloc(size);
+	/* one block, the new task's: the state, then a copy of the variables */
+	size_t size = as_size(s);
+	size_t vars = (ARGSCRIPT_VARS > 0) ? s->vars * sizeof(as_var_t) : 0u;
+	as_state_t *c = malloc(size + vars);
 
 	if (c == NULL) {
 		return as_error(s, "out of memory");
@@ -657,35 +671,22 @@ static int as_run(as_state_t *s, char *p)
 
 	memcpy(c, s, size);
 	c->wait = 0;
-	c->var = NULL;
+	c->var = (vars > 0u) ? (as_var_t *)((char *)c + size) : NULL;
 
-	if (ARGSCRIPT_VARS > 0 && s->vars > 0) {
-		c->var = malloc(s->vars * sizeof(as_var_t));
-
-		if (c->var != NULL) {
-			memcpy(c->var, s->var, s->vars * sizeof(as_var_t));
-		}
+	if (vars > 0u) {
+		memcpy(c->var, s->var, vars);
 	}
 
-	const char *error = "out of memory";
-	task_t *t = NULL;
-
-	if (ARGSCRIPT_VARS > 0 && s->vars > 0 && c->var == NULL) {
-		/* no room for the variables */
-	} else if (as_label(c, label + 1) < 0) {
-		error = "not found";
-	} else {
-		t = task_create(name, as_task, c);
-	}
-
-	if (t == NULL) {
-		free(c->var);
+	if (as_label(c, label + 1) < 0) {
 		free(c);
-		return as_error(s, error);
+		return as_error(s, "not found");
 	}
 
-	/* the copy of the variables is the new task's, as its state is */
-	alloc_change_owner(c->var, (int)(t - task_get_data()));
+	if (task_create(name, as_task, c) == NULL) {
+		free(c);
+		return as_error(s, "out of memory");
+	}
+
 	s->result = 0;
 
 	return 0;
@@ -757,15 +758,8 @@ static int as_step(as_state_t *s)
 		 * small board) up to here; the last line often starts a task that needs that memory.
 		 */
 		if (s->depth == 0 && as_last(s)) {
-			task_t *t = task_get_data();
-			int i = task_get_current();
-
-			if (i >= 0 && t[i].arg == s) {
-				t[i].arg = NULL; /* the task no longer owns it */
-			}
-
-			free(s->var);
-			free(s);
+			as_var_free(s);
+			free(s); /* its block is gone: the task's end has nothing more to free */
 			system(as_line); /* as_line is not in the state */
 
 			return -1;
@@ -913,10 +907,21 @@ static int as_task(void *args, uint64_t system_time)
 	return 0;
 }
 
-/* a new script task: `src` a text in memory, or NULL and `path` the file */
+/*
+ * A new script task: `src` a text in memory, or NULL and `path` the file. A relative path is
+ * made whole with the working directory now: a `cd` in the script does not move its file.
+ */
 static as_state_t *as_new(const char *name, as_reader_t read, const char *src, const char *path)
 {
-	size_t size = (src == NULL) ? strlen(path) + 1u : 0u;
+	char cwd[AS_PATH_MAX];
+
+	cwd[0] = '\0';
+
+	if (src == NULL && path[0] != '/' && getcwd(cwd, sizeof(cwd)) != NULL && cwd[1] != '\0') {
+		strcat(cwd, "/"); /* not after "/" */
+	}
+
+	size_t size = (src == NULL) ? strlen(cwd) + strlen(path) + 1u : 0u;
 	as_state_t *s = malloc(sizeof(as_state_t) + size);
 
 	if (s == NULL) {
@@ -926,9 +931,9 @@ static as_state_t *as_new(const char *name, as_reader_t read, const char *src, c
 	memset(s, 0, sizeof(as_state_t));
 	s->read = read;
 	s->src = src;
-	s->cwd = task_streams()->cwd;
 	if (size != 0u) {
-		memcpy(s->path, path, size);
+		strcpy(s->path, cwd);
+		strcat(s->path, path);
 	}
 
 	if (task_create(name, as_task, s) == NULL) {

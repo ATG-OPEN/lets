@@ -207,9 +207,20 @@ static long long_pos; /* the read position of the file open now */
 static int flaky_fails;
 static int flaky_lose; /* what `lose` sets flaky_fails to */
 
+/* the working directory, as a path: directory 5 is /d5 */
+char *t_getcwd(char *buf, size_t size)
+{
+	snprintf(buf, size, "%s", (task_streams()->cwd == 5) ? "/d5" : "/");
+	return buf;
+}
+
 int t_open(const char *path, int flags, ...)
 {
 	(void)flags;
+	/* a script's file is opened by its whole path, from where it started */
+	if (strcmp(path, "/d5/here") == 0 || (strcmp(path, "here") == 0 && task_streams()->cwd == 5))
+		return 10;
+	path += (path[0] == '/') ? 1 : 0;
 	if (strcmp(path, "pot") == 0)
 		return 3;
 	if (strcmp(path, "led") == 0)
@@ -224,9 +235,6 @@ int t_open(const char *path, int flags, ...)
 		return 8;
 	if (strcmp(path, "big") == 0)
 		return 9;
-	/* only in directory 5 */
-	if (strcmp(path, "here") == 0 && task_streams()->cwd == 5)
-		return 10;
 	/* opens after flaky_fails more tries (as with a full heap) */
 	if (strcmp(path, "flaky") == 0 && flaky_fails > 0) {
 		flaky_fails--;
@@ -378,9 +386,14 @@ int t_system(const char *cmd)
 		return -1;
 	}
 
-	/* whether the script still holds its state while this command runs */
+	/* whether the script still holds its state (a block it owns) while this command runs */
 	if (strcmp(cmd, "state") == 0) {
-		log_add((current >= 0 && tasks[current].arg == NULL) ? "[freed]" : "[held]");
+		bool held = false;
+
+		for (int i = 0; i < BLOCKS; i++) {
+			held |= (current >= 0 && blocks[i].p != NULL && blocks[i].owner == current);
+		}
+		log_add(held ? "[held]" : "[freed]");
 		return 0;
 	}
 

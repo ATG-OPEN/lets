@@ -59,7 +59,7 @@ build/test_wdt: tests/test_wdt.c $(KERNEL) | build
 build/as_test: argscript/test/as_test.c argscript/argscript.c lib/args.c | build
 	$(CC) -std=c99 $(WARN) $(SAN) -include fcntl.h -Dopen=t_open -Dread=t_read -Dwrite=t_write \
 	    -Dclose=t_close -Dsystem=t_system -Dlseek=t_lseek -Dmalloc=t_malloc -Dfree=t_free \
-	    -Dprintf=t_printf argscript/test/as_test.c argscript/argscript.c lib/args.c -o $@
+	    -Dprintf=t_printf -Dgetcwd=t_getcwd argscript/test/as_test.c argscript/argscript.c lib/args.c -o $@
 
 # the nRF52 tty with EasyDMA, on registers the test plays (tests/nrf52/nrf.h)
 build/test_nrf52: tests/test_nrf52.c tests/nrf52/nrf.h port/nrf52/nrf52.c port/nrf52/nrf52.h | build
