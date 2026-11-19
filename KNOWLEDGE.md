@@ -65,6 +65,9 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   line in a task of its own (`lines_spawn()`), `kill NAME` scans the rows. Takes one directory
   slot (VFS_DIRS_MAX default +1). `-DVFS_PROC=0` (PIC24M, flash full) leaves the mount out:
   `top` asks `vfs_proc_line()` / `vfs_proc_mem()` directly, `kill` uses `task_stop_byname()`.
+- **VFS_FD_TASK** (0 by default): 1 closes what a task opened when it ends or is killed (each handle
+  remembers its opener). Off by default because a command may open a handle and hand it to a task
+  it starts; the whole host suite passes with it on. Floor build +117 B, +16 B RAM.
 - **Shell:** `std [-t] NODE` moves the shell (terminal or link mode), `;` separates commands,
   redirection `<` `>`; commands `ls cd cat echo top kill mv touch rm cp mount df date uptime passwd
   reboot ...`; password asked once per input stream, again after `vfs_peer_new()`; default

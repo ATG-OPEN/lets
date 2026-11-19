@@ -58,6 +58,17 @@ static int worker(void *arg, uint64_t now)
 	return 50;
 }
 
+/* opens a RAM file and keeps it open (VFS_FD_TASK: closed when it is killed) */
+static int opener_fd = -1;
+
+static int opener(void *arg, uint64_t now)
+{
+	if (opener_fd < 0) {
+		opener_fd = open("/tmp/held", O_WRONLY | O_CREAT, 0);
+	}
+	return 1000;
+}
+
 static int resets;
 
 /* reboot() ends in the port's reset */
@@ -138,6 +149,26 @@ static int checks(void *arg, uint64_t now)
 #if VFS_PROC
 		snprintf(buf, sizeof(buf), "/proc/%d", w);
 		CHECK(open(buf, O_RDONLY, 0) < 0 && open("/proc/x1", O_RDONLY, 0) < 0); /* a free slot */
+#endif
+
+		/* a task that ends leaves its handles open, or (VFS_FD_TASK) they are closed with it */
+		task_create("opener", worker, NULL);
+		CHECK(kill(slot_of("opener"), SIGTERM) == 0);
+		task_create("opener", opener, NULL);
+		step = -1;
+		return 1;
+	}
+
+	if (step == -1) {
+		if (opener_fd < 0) {
+			return 1;
+		}
+		CHECK(remove("/tmp/held") == -1); /* open: busy */
+		CHECK(kill(slot_of("opener"), SIGTERM) == 0);
+#if VFS_FD_TASK
+		CHECK(remove("/tmp/held") == 0);
+#else
+		CHECK(remove("/tmp/held") == -1 && close(opener_fd) == 0 && remove("/tmp/held") == 0);
 #endif
 
 		/* the command: by name, through the rows */

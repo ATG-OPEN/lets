@@ -52,6 +52,9 @@ build/test_proc: tests/test_proc.c $(KERNEL) | build
 build/test_proc0: tests/test_proc.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DVFS_PROC=0 tests/test_proc.c $(KERNEL) -o $@
 
+build/test_proc_fd: tests/test_proc.c $(KERNEL) | build
+	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DVFS_FD_TASK=1 tests/test_proc.c $(KERNEL) -o $@
+
 # the scheduler's watchdog (LETS_WDT) on a fake clock and a fake watchdog
 build/test_wdt: tests/test_wdt.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DLETS_WDT=1 tests/test_wdt.c $(KERNEL) -o $@
@@ -79,12 +82,13 @@ LIBS    = $(wildcard lib/*.c) $(wildcard opt/*.c)
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done
 
-test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/test_proc0 build/test_vfs build/as_test build/test_nrf52 build/test_tty build/test_tty_dpx libs
+test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/test_proc0 build/test_proc_fd build/test_vfs build/as_test build/test_nrf52 build/test_tty build/test_tty_dpx libs
 	./build/test_kernel
 	./build/test_sleep
 	./build/test_wdt
 	./build/test_proc
 	./build/test_proc0
+	./build/test_proc_fd
 	./build/test_vfs
 	./build/as_test
 	./build/test_nrf52

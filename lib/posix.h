@@ -51,6 +51,16 @@
 #define VFS_PROC 1 /**< 1: the kernel's /proc is mounted (vfs/proc.c); 0 leaves it out. */
 #endif
 
+#ifndef VFS_FD_TASK
+/**
+ * 1: what a task opened is closed when it ends or is killed, as a process's files on Linux
+ * (vfs.c). 0 (the default): a handle stays open until close(), whoever calls it - code that
+ * opens a handle in one task and gives it to another (a command starting a link task on a tty)
+ * keeps working; a killed task's handles leak.
+ */
+#define VFS_FD_TASK 0
+#endif
+
 /** mount() flag of LETS: format a device that holds no file system (tfs; `mount -f`). */
 #define MS_FORMAT 0x40000000ul
 

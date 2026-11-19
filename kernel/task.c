@@ -8,6 +8,7 @@
 
 #include "task.h"
 #include "alloc.h"
+#include "../lib/posix.h" /* VFS_FD_TASK */
 
 #include <stdint.h>
 #include <string.h>
@@ -60,6 +61,9 @@ static uint8_t task_reason; /* a task_reset_t */
 /* vfs: a new task holds its streams open, one that stopped lets them go */
 extern void vfs_streams_hold(int in, int out) __attribute__((weak));
 extern void vfs_streams_close(int in, int out) __attribute__((weak));
+#if VFS_FD_TASK
+extern void vfs_task_files_close(int slot) __attribute__((weak)); /* what it left open */
+#endif
 
 /* the clock given to task_initialize() */
 static uint64_t (*task_get_us_from_system)(void) = NULL;
@@ -84,6 +88,12 @@ static void task_release(int i)
 	if (vfs_streams_close != NULL) {
 		vfs_streams_close(s.in, s.out);
 	}
+
+#if VFS_FD_TASK
+	if (vfs_task_files_close != NULL) {
+		vfs_task_files_close(i);
+	}
+#endif
 }
 
 /* -------------------------------------------------------------------------- */

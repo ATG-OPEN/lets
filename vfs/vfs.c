@@ -795,6 +795,9 @@ typedef struct {
 	unsigned int position;	   /* a node's read position */
 	uint8_t holders;	   /* 0: a free entry */
 	uint8_t flags;		   /* open()'s access mode, and VFS_FD_PEER */
+#if VFS_FD_TASK
+	int8_t task; /* the task that opened it (-1: main()) */
+#endif
 } vfs_fd_t;
 
 #define VFS_FD_PEER 0x80u /* the driver saw a new peer (vfs_peer_new()), not asked yet */
@@ -821,6 +824,9 @@ static int vfs_fd_new(const vfs_fs_type_t *type, void *fs, void *object, int fla
 			f->position = 0;
 			f->holders = 1;
 			f->flags = (uint8_t)(flags & O_ACCMODE);
+#if VFS_FD_TASK
+			f->task = (int8_t)task_get_current();
+#endif
 
 			return VFS_FD_FIRST + (int)k;
 		}
@@ -1024,6 +1030,19 @@ int vfs_fd_close(int handle)
 
 	return r;
 }
+
+#if VFS_FD_TASK
+/* the kernel: task @p slot has ended; what it opened and did not close is closed now */
+void vfs_task_files_close(int slot)
+{
+	for (unsigned int k = 0; k < VFS_FDS_MAX; k++) {
+		if (vfs_fds[k].holders > 0 && vfs_fds[k].task == slot) {
+			vfs_fds[k].task = -1; /* its own open only: other holders keep theirs */
+			vfs_fd_close(VFS_FD_FIRST + (int)k);
+		}
+	}
+}
+#endif
 
 int vfs_file_abort(int handle)
 {
