@@ -35,6 +35,20 @@ task_reset_t port_wdt_reset_cause(uint16_t *raw)
 			       : TASK_RESET_OTHER;
 }
 
+#if defined(__dsPIC33C__) || defined(__dsPIC33E__) && defined(_WDTCONL_ON_POSITION)
+/* dsPIC33C (dsPIC33CK, dsPIC33CH): the watchdog is WDTCONL.ON (FWDTEN = ON_SW in the config bits),
+   fed by writing the key 0x5743 to WDTCONH (WDTCLRKEY); RCON has no SWDTEN */
+void port_wdt_start(uint16_t ms)
+{
+	(void)ms;
+	WDTCONLbits.ON = 1;
+}
+
+void port_wdt_kick(void)
+{
+	WDTCONH = 0x5743u;
+}
+#else
 void port_wdt_start(uint16_t ms)
 {
 	(void)ms;
@@ -46,6 +60,7 @@ void port_wdt_kick(void)
 {
 	__asm__ volatile("clrwdt");
 }
+#endif
 
 void port_wdt_reset_now(void)
 {
@@ -64,7 +79,10 @@ extern char _SP_init; /* from the linker: the bottom of the stack */
 /* what is above the stack pointer now: port_stack() reads how far it was used */
 void port_stack_init(void)
 {
-	for (uint16_t *p = (uint16_t *)WREG15 + 1; p < (uint16_t *)SPLIM; p++) {
+	uint16_t *sp;
+
+	__asm__ volatile("mov w15, %0" : "=r"(sp)); /* the stack pointer, read safely */
+	for (uint16_t *p = sp + 1; p < (uint16_t *)SPLIM; p++) {
 		*p = WDT_STACK_PATTERN;
 	}
 }

@@ -37,6 +37,18 @@
 #include <sys/types.h>
 #endif
 
+/*
+ * A C library that has these types and calls already (newlib on Cortex-M, without the port's prelude
+ * that renames the kernel's to k_*): its struct stat, stat(), fstat(), gettimeofday() and
+ * settimeofday() are used, the rest is declared here. With the prelude (every LETS Cortex-M build)
+ * and on XC16, LETS declares them all.
+ */
+#if defined(__NEWLIB__) && !defined(LETS_PRELUDE_RENAMED)
+#define LETS_LIBC_HAS_STAT 1
+#include <sys/stat.h>
+#include <sys/time.h>
+#endif
+
 /* open() flags; XC16 has no <fcntl.h>, so the values of its <bits/fcntl.h> */
 #ifndef O_WRONLY
 #define O_RDONLY 0
@@ -129,10 +141,12 @@ int kill(pid_t pid, int sig);
 int clock_gettime(clockid_t clock, struct timespec *t);
 /** @brief Sets CLOCK_REALTIME (a step). @return 0, -1 for another clock. */
 int clock_settime(clockid_t clock, const struct timespec *t);
+#ifndef LETS_LIBC_HAS_STAT
 /** @brief CLOCK_REALTIME in s and us; @p tz is not used. @return 0. */
 int gettimeofday(struct timeval *tv, void *tz);
 /** @brief Sets CLOCK_REALTIME (a step); @p tz is not used. @return 0. */
 int settimeofday(const struct timeval *tv, const void *tz);
+#endif
 /**
  * @brief Slews CLOCK_REALTIME by @p delta (at most 500 us a second, it never runs back);
  * @p olddelta gets what was still to go in. Either may be NULL. A negative tv_sec where time_t
@@ -201,6 +215,7 @@ int rename(const char *from, const char *to);
  * system and a RAM file are S_IFREG (they end), a node a device: S_IFCHR, S_IFBLK for a block
  * device (vfs_blk_register()).
  */
+#ifndef LETS_LIBC_HAS_STAT
 struct stat {
 	mode_t st_mode;
 	off_t st_size;
@@ -213,6 +228,7 @@ int stat(const char *path, struct stat *st);
 
 /** @brief What the open handle @p fd is (0, 1, 2: the task's streams); no size. @return 0 or -1. */
 int fstat(int fd, struct stat *st);
+#endif
 
 /** What statvfs() tells, in bytes (f_bsize 1). */
 struct statvfs {
