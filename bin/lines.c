@@ -89,7 +89,7 @@ static int lines_task(void *arg, uint64_t system_time)
 	(void)system_time;
 
 	/* a few pieces a call: the other tasks run in between */
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < ((lines_t *)arg)->calls; i++) {
 		int r = lines_step(arg);
 
 		if (r == LINES_DONE || r == LINES_GONE) {
@@ -128,6 +128,8 @@ int lines_run(const char *name, lines_t *l)
 	}
 
 	/* the stream is full: a task goes on with it, the shell waits for that */
+	l->calls = 4;
+
 	return lines_spawn(name, l);
 }
 
@@ -140,6 +142,8 @@ int lines_spawn(const char *name, lines_t *l)
 		printf("no free task slot\n");
 		return -1;
 	}
+
+	l->calls += (l->calls == 0) ? 1 : 0; /* top: one line a call, as it always wrote */
 
 	fsync(1); /* what stdout already holds goes first */
 	shell_wait(t);

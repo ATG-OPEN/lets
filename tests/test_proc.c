@@ -135,6 +135,10 @@ static int checks(void *arg, uint64_t now)
 		CHECK(kill(w, 0) == 0 && kill(w, SIGTERM) == 0 && kill(w, 0) == -1 && kill(w, SIGTERM) == -1);
 		CHECK(slot_of("worker") == -1 && vfs_proc_line(2u + (unsigned int)w, buf, sizeof(buf)) == 0);
 		CHECK(kill(-1, 0) == -1 && kill(TASKS_MAX_COUNT, 0) == -1);
+#if VFS_PROC
+		snprintf(buf, sizeof(buf), "/proc/%d", w);
+		CHECK(open(buf, O_RDONLY, 0) < 0 && open("/proc/x1", O_RDONLY, 0) < 0); /* a free slot */
+#endif
 
 		/* the command: by name, through the rows */
 		task_create("victim", worker, NULL);

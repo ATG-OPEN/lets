@@ -58,6 +58,7 @@ struct lines {
 	lines_next_t next;
 	uint8_t length; /* of piece, 0: make the next one */
 	uint8_t at;	/* written of it so far */
+	uint8_t calls;	/* pieces a call of the task: 4, or 1 (lines_spawn(): slow pieces, as top's) */
 	char piece[LINES_SIZE + 1u];
 };
 

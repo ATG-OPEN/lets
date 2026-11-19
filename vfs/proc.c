@@ -413,7 +413,8 @@ static int proc_text(const char *name, char *buf, unsigned int max)
 	return (made > 0) ? made : -1;
 }
 
-#define PROC_SLACK 8 /* bytes more than counted: the text's numbers may grow meanwhile */
+#define PROC_SLACK 8  /* bytes more than counted: the text's numbers may grow meanwhile */
+#define PROC_LINE  97 /* a line of top, its '\n' and the 0 (lines.h: LINES_SIZE + 1) */
 
 typedef struct {
 	uint16_t size;
@@ -434,16 +435,18 @@ static void proc_umount(void *fs)
 	(void)fs;
 }
 
+/* there or not; no size (0, as on Linux): the text is made only when it is opened */
 static int proc_info(void *fs, const char *name, vfs_info_t *info)
 {
-	int n = proc_text(name, NULL, 0);
+	int line = proc_name(name);
 
-	if (n < 0) {
+	if (strcmp(name, "mem") != 0 &&
+	    (line < 0 || (line >= 2 && (line - 2 >= (int)TASKS_MAX_COUNT ||
+					task_get_data()[line - 2].state == TASK_UNUSED)))) {
 		return -1;
 	}
 
 	memset(info, 0, sizeof(*info));
-	info->size = (uint32_t)n;
 
 	return 0;
 }
@@ -481,23 +484,29 @@ static int proc_dir(void *fs, uint16_t *index, char *name, vfs_info_t *info)
 }
 
 /*
- * The text is made now, for this handle. It is counted first; the block for it changes what
- * the heap holds, so a few more digits get room.
+ * The text is made now, for this handle, once: a line of `top` takes at most PROC_LINE bytes;
+ * /proc/mem is counted first (the block for it changes what the heap holds, so a few more digits
+ * get room).
  */
 static void *proc_open(void *fs, const char *name, int flags)
 {
-	int n = proc_text(name, NULL, 0) + PROC_SLACK;
+	vfs_info_t info;
+	int n = (strcmp(name, "mem") == 0) ? proc_text(name, NULL, 0) + PROC_SLACK : PROC_LINE;
 
-	if (n < PROC_SLACK || (flags & O_ACCMODE) != O_RDONLY) {
-		return NULL;
+	if (proc_info(fs, name, &info) < 0 || (flags & O_ACCMODE) != O_RDONLY) {
+		return NULL; /* not there (no O_CREAT here), or not for reading */
 	}
 
 	proc_file_t *f = malloc(sizeof(proc_file_t) + (size_t)n);
+	int made = (f == NULL) ? -1 : proc_text(name, f->text, (unsigned int)n);
 
-	if (f != NULL) {
-		f->at = 0;
-		f->size = (uint16_t)proc_text(name, f->text, (unsigned int)n);
+	if (made < 0) {
+		free(f);
+		return NULL;
 	}
+
+	f->at = 0;
+	f->size = (uint16_t)made;
 
 	return f;
 }
