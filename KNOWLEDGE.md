@@ -139,11 +139,14 @@ to the project.
 ## Known issues and TODO
 
 The POSIX line (branch `posix-line`, 2026-11-19), still open:
+- Left above the line on purpose: the task calls (`task_create`, `task_alloc`, `task_stopping`,
+  `shell_wait`: LETS's process API, used by lines, reboot, argscript), the node `date`
+  (`vfs_node_create`, a program offering a device), `bin.c` including `vfs.h` for the command
+  table (`vfs_command_t`), and `cat` with no file asking `task_streams()->in` (no POSIX way to
+  tell the shell's own input from a redirected one).
 - The shell keeps its kernel calls: `task_streams()` (redirect / terminal of `shell -t`),
   `vfs_stream(0)` (did `std` move the input), `vfs_peer_changed()` (password), `vfs_console()`,
   `task_stop_byname()` for Ctrl-C, the node table for Tab. It is the login and init of LETS.
-- The task calls (`task_create`, `task_alloc`, `task_stopping`, `shell_wait`) are LETS's process
-  calls; `sys`, `lines`, `top`, `reboot`, argscript use them.
 - `VFS_FD_TASK` is off by default.
 - PIC24M has 9 B of flash left (with `VFS_PROC=0`); DEMO top: 4.8 ms a call (2.2 ms before).
 
