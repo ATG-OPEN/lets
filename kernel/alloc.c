@@ -9,6 +9,8 @@
 
 #include "alloc.h"
 
+#include <errno.h>
+
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -49,6 +51,8 @@ static void alloc_release(int i)
 
 void *__attribute__((__section__(".libc.malloc"))) malloc(size_t size)
 {
+	errno = ENOMEM; /* set before, as POSIX allows */
+
 	if (size == 0 || size > alloc_heap_length) {
 		return NULL;
 	}

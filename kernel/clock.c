@@ -16,6 +16,8 @@
 #include "task.h"
 #include "../lib/posix.h"
 
+#include <errno.h>
+
 #define CLOCK_SLEW_PPM	500		/* a slew moves the clock at most this fast */
 #define CLOCK_ANCHOR_US 0x40000000ull	/* re-anchored after this long (~18 min): small products */
 
@@ -88,6 +90,7 @@ int clock_gettime(clockid_t clock, struct timespec *t)
 int clock_settime(clockid_t clock, const struct timespec *t)
 {
 	if (clock != CLOCK_REALTIME) {
+		errno = EINVAL;
 		return -1;
 	}
 

@@ -17,6 +17,8 @@
 #include "vfs.h"
 
 #include "tmp.h"
+
+#include <errno.h>
 #include "../kernel/task.h"
 
 #include <stddef.h>
@@ -379,6 +381,8 @@ uint8_t vfs_cwd(void)
 
 int chdir(const char *path)
 {
+	errno = ENOENT;
+
 	vfs_path_t p;
 
 	if (vfs_resolve(path, &p) < 0 || p.kind != VFS_DIR) {
@@ -512,6 +516,8 @@ static mode_t vfs_mode(const vfs_dirent_t *e)
 
 int stat(const char *path, struct stat *st)
 {
+	errno = ENOENT;
+
 	vfs_path_t p;
 	vfs_dirent_t e;
 	vfs_info_t info;
@@ -558,6 +564,8 @@ int stat(const char *path, struct stat *st)
 
 int statvfs(const char *path, struct statvfs *buf)
 {
+	errno = ENOSYS;
+
 	vfs_path_t p;
 	const vfs_fs_type_t *type;
 	uint32_t size, avail;
@@ -585,6 +593,8 @@ struct lets_dir {
 
 DIR *opendir(const char *path)
 {
+	errno = ENOTDIR;
+
 	vfs_path_t p;
 
 	if (path == NULL || vfs_resolve(path, &p) < 0 || p.kind != VFS_DIR) {
@@ -683,6 +693,8 @@ int vfs_register_app(const char *path, int (*execute_handler)(void *args, int ar
 
 int mkdir(const char *path, mode_t mode)
 {
+	errno = EEXIST;
+
 	vfs_path_t p;
 
 	(void)mode;
@@ -696,6 +708,8 @@ int mkdir(const char *path, mode_t mode)
 
 int remove(const char *path)
 {
+	errno = EBUSY;
+
 	vfs_path_t p;
 
 	if (vfs_resolve(path, &p) < 0) {
@@ -745,6 +759,8 @@ int remove(const char *path)
 
 int rename(const char *from, const char *to)
 {
+	errno = EINVAL;
+
 	vfs_path_t a, b;
 
 	if (vfs_resolve(from, &a) < 0 || vfs_resolve(to, &b) < 0) {
@@ -1029,6 +1045,8 @@ bool vfs_device_open(const void *args)
 
 int fstat(int fd, struct stat *st)
 {
+	errno = EBADF;
+
 	vfs_fd_t *f = vfs_fd(vfs_stream(fd));
 	vfs_dirent_t e;
 
@@ -1328,6 +1346,8 @@ void *vfs_mount_get(uint8_t dir, const vfs_fs_type_t **type)
 int mount(const char *source, const char *path, const char *type, unsigned long flags,
 	  const void *data)
 {
+	errno = EINVAL;
+
 	(void)data;
 
 	vfs_fs_type_t *t = vfs_types;
@@ -1388,6 +1408,8 @@ int mount(const char *source, const char *path, const char *type, unsigned long 
 
 int umount(const char *path)
 {
+	errno = EBUSY;
+
 	vfs_path_t p;
 
 	if (vfs_resolve(path, &p) < 0 || p.kind != VFS_DIR) {

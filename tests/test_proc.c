@@ -15,6 +15,7 @@
 #include "../bin/date.h"
 
 #include <signal.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -119,6 +120,7 @@ static int step;
 static int checks(void *arg, uint64_t now)
 {
 	char buf[256];
+	struct stat st;
 
 	if (step == 0) {
 		/* stat and meminfo: top's first two lines */
@@ -189,6 +191,15 @@ static int checks(void *arg, uint64_t now)
 		CHECK(mkdir("/tmp/d", 0) == 0 && rename("/tmp/d", "/tmp/e") == 0 && remove("/tmp/e") == 0);
 		CHECK(isatty(0) == 0 && isatty(1) == 0 && isatty(7) == 0);
 
+		/* errno: what went wrong */
+		CHECK(open("/nothing", O_RDONLY, 0) == -1 && errno == ENOENT);
+		CHECK(open("/", O_RDONLY, 0) == -1 && errno == EISDIR);
+		CHECK(read(99, buf, 1) == -1 && errno == EBADF && close(99) == -1 && errno == EBADF);
+		CHECK(kill(TASKS_MAX_COUNT - 1, 0) == -1 && errno == ESRCH);
+		CHECK(mkdir("/tmp", 0) == -1 && errno == EEXIST && chdir("/nothing") == -1 && errno == ENOENT);
+		CHECK(opendir("/bin/ls") == NULL && errno == ENOTDIR && stat("/x/y", &st) == -1 && errno == ENOENT);
+		CHECK(malloc(100000) == NULL && errno == ENOMEM && system("nothing") == -1 && errno == ENOENT);
+
 		/* the clocks: monotonic from the board's clock, realtime set, slewed, rate-corrected */
 		struct timespec ts;
 		struct timeval tv = {1700000000, 250000};
@@ -214,7 +225,7 @@ static int checks(void *arg, uint64_t now)
 		CHECK((long)old.tv_sec * 1000000 + old.tv_usec <= -2990 && (long)old.tv_sec * 1000000 + old.tv_usec >= -3000);
 
 		/* stat, fstat, opendir / readdir / telldir / seekdir, ioctl */
-		struct stat st, st2;
+		struct stat st2;
 		CHECK(stat("/", &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & S_IXUSR));
 		CHECK(stat("/bin/ls", &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0700) == S_IXUSR);
 		CHECK(stat("/dev/sink", &st) == 0 && S_ISCHR(st.st_mode) && (st.st_mode & 0700) == S_IWUSR);

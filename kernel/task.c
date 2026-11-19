@@ -11,6 +11,7 @@
 #include "../lib/posix.h" /* VFS_FD_TASK */
 
 #include <stdint.h>
+#include <errno.h>
 #include <string.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -264,6 +265,8 @@ static int task_stop_match(const char *name, const void *arg, bool any)
 /* kill(2): any signal but 0 stops the task, as task_stop_byname() */
 int kill(pid_t pid, int sig)
 {
+	errno = ESRCH;
+
 	if (pid < 0 || pid >= (pid_t)TASKS_MAX_COUNT) {
 		return -1;
 	}

@@ -22,6 +22,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <errno.h>
 
 /* -------------------------------------------------------------------------- */
 
@@ -95,11 +96,15 @@ static int posix_stdout_write(int fd, const char *buffer, unsigned int len)
  */
 int __attribute__((__section__(".libc.open"))) open(const char *pathname, int flags, int mode)
 {
+	errno = ENOENT; /* errno: set before, as POSIX allows; the cause where it is known */
+
 	vfs_path_t p;
 
 	if (vfs_resolve(pathname, &p) < 0) {
 		return -1;
 	}
+
+	errno = EMFILE; /* found: the handles are all taken, or the heap is full */
 
 	if (p.kind == VFS_NODE) {
 		if (flags & O_TRUNC) {
@@ -119,11 +124,15 @@ int __attribute__((__section__(".libc.open"))) open(const char *pathname, int fl
 		return (node < 0) ? -1 : vfs_node_open(node, flags);
 	}
 
+	errno = (p.kind == VFS_DIR) ? EISDIR : ENOENT;
+
 	return -1;
 }
 
 int __attribute__((__section__(".libc.close"))) close(int handle)
 {
+	errno = EBADF;
+
 	/* what stdout still holds for it goes first */
 	if (handle == posix_stdout_fd) {
 		vfs_stdout_flush();
@@ -134,6 +143,8 @@ int __attribute__((__section__(".libc.close"))) close(int handle)
 
 int __attribute__((__section__(".libc.write"))) write(int handle, void *buffer, unsigned int len)
 {
+	errno = EBADF;
+
 	int fd = vfs_stream(handle);
 
 	if (handle != 1) {
@@ -149,6 +160,8 @@ int __attribute__((__section__(".libc.write"))) write(int handle, void *buffer, 
 
 int __attribute__((__section__(".libc.read"))) read(int handle, void *buffer, unsigned int len)
 {
+	errno = EBADF;
+
 	return vfs_fd_read(vfs_stream(handle), buffer, len);
 }
 
@@ -168,17 +181,23 @@ void sync(void)
 
 int ioctl(int fd, unsigned long request, ...)
 {
+	errno = EINVAL;
+
 	return (request == LETS_IOC_ABORT) ? vfs_file_abort(vfs_stream(fd)) : -1;
 }
 
 char *getcwd(char *buffer, size_t size)
 {
+	errno = ERANGE;
+
 	return (vfs_dir_path(vfs_cwd(), buffer, (unsigned int)size) < 0) ? NULL : buffer;
 }
 
 /* files: the full 32-bit position (a node's lseek handler returns an int) */
 off_t __attribute__((__section__(".libc.lseek"))) lseek(int handle, off_t offset, int whence)
 {
+	errno = EINVAL;
+
 	return (off_t)vfs_fd_seek(handle, (int32_t)offset, whence);
 }
 
@@ -400,6 +419,8 @@ static int posix_run_script(const char *name, bool found)
 		printf("not found\n");
 	}
 
+	errno = found ? EACCES : ENOENT; /* after printf(), which may set it */
+
 	return -1;
 }
 
@@ -440,6 +461,8 @@ static inline __attribute__((always_inline)) int posix_run(void)
  */
 int __attribute__((__section__(".libc.system"))) system(const char *input)
 {
+	errno = ENOENT;
+
 	if (input == NULL) {
 		return -1;
 	}
