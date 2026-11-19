@@ -109,9 +109,17 @@ int kill(pid_t pid, int sig);
 /* -------------------------------------------------------------------------- */
 /* the clocks (kernel/clock.c) */
 
+/* newlib (Cortex-M) has CLOCK_REALTIME (1) but CLOCK_MONOTONIC only with _POSIX_MONOTONIC_CLOCK:
+   each is defined here when missing, MONOTONIC never equal to REALTIME (the kernel tells them apart) */
+#ifndef CLOCK_REALTIME
+#define CLOCK_REALTIME 0
+#endif
 #ifndef CLOCK_MONOTONIC
-#define CLOCK_REALTIME	0
+#if CLOCK_REALTIME == 1
+#define CLOCK_MONOTONIC 4 /* newlib's value */
+#else
 #define CLOCK_MONOTONIC 1
+#endif
 #endif
 
 /**
