@@ -3,8 +3,10 @@
 
 #include "date.h"
 
-#include "../kernel/task.h"
-#include "../vfs/vfs.h"
+#include "../lib/posix.h"
+#include "../vfs/vfs.h" /* vfs_node_create(): the node `date` */
+
+#include <limits.h>
 
 #include <stdio.h>
 #include <string.h>
@@ -13,117 +15,95 @@
 #define DATE_DAY  86400ul	/* seconds */
 #define DATE_MAX_YEAR 2105	/* seconds since 1970 fit 32 bits up to here */
 
-#define DATE_SLEW_PPM 500		/* a slew moves the clock at most this fast */
-#define DATE_ANCHOR_US 0x40000000ull	/* re-anchored after this long (~18 min): small products */
-
-/*
- * The time is counted from an anchor: what the kernel's clock read then (up0) and the time it
- * was (utc0), both in µs. Since then it runs at the kernel's rate corrected by date_rate (ppb),
- * and a slew still to be applied (date_slew) goes in at DATE_SLEW_PPM.
- */
-static uint64_t date_up0;
-static uint64_t date_utc0;
-static int32_t date_rate;
-static int64_t date_slew;
-static bool date_valid;
-
-/* the time at kernel time @p up, and in @p slewed how much of the slew is in it */
-static uint64_t date_at(uint64_t up, int64_t *slewed)
-{
-	uint64_t dt = up - date_up0;
-	int64_t corr = (int64_t)dt * date_rate / 1000000000ll;
-	int64_t most = (int64_t)(dt / (1000000ull / DATE_SLEW_PPM));
-	int64_t s = date_slew;
-
-	if (s > most) {
-		s = most;
-	} else if (s < -most) {
-		s = -most;
-	}
-
-	*slewed = s;
-
-	return date_utc0 + dt + (uint64_t)(corr + s);
-}
-
-/* moves the anchor to now */
-static uint64_t date_anchor(void)
-{
-	uint64_t up = task_get_system_time();
-	int64_t s;
-	uint64_t now = date_at(up, &s);
-
-	date_up0 = up;
-	date_utc0 = now;
-	date_slew -= s;
-
-	return now;
-}
+/* -------------------------------------------------------------------------- */
+/* the kernel's clocks (kernel/clock.c), as the date_*() calls of before */
 
 uint32_t date_uptime(void)
 {
-	return (uint32_t)(task_get_system_time() / 1000000ull);
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+
+	return (uint32_t)t.tv_sec;
 }
 
 uint64_t date_now_us(void)
 {
-	uint64_t up = task_get_system_time();
-	int64_t s;
+	struct timeval tv;
 
-	if (up - date_up0 >= DATE_ANCHOR_US) {
-		return date_anchor();
-	}
+	gettimeofday(&tv, NULL);
 
-	return date_at(up, &s);
+	return (uint64_t)tv.tv_sec * 1000000u + (uint64_t)tv.tv_usec;
 }
 
 uint32_t date_now(void)
 {
-	return (uint32_t)(date_now_us() / 1000000ull);
+	struct timeval tv;
+
+	gettimeofday(&tv, NULL);
+
+	return (uint32_t)tv.tv_sec;
 }
 
 void date_set_us(uint64_t us)
 {
-	date_up0 = task_get_system_time();
-	date_utc0 = us;
-	date_slew = 0;
-	date_valid = true;
+	struct timeval tv;
+
+	tv.tv_sec = (time_t)(us / 1000000u);
+	tv.tv_usec = (suseconds_t)(us % 1000000u);
+	settimeofday(&tv, NULL);
 }
 
 void date_set(uint32_t seconds)
 {
-	date_set_us((uint64_t)seconds * 1000000ull);
+	date_set_us((uint64_t)seconds * 1000000u);
 }
 
+/* a slew of at most a long's us (35 min with 32 bits): a longer one is a step's business */
 void date_adjust_us(int64_t delta)
 {
-	date_anchor();
-	date_slew += delta;
+	struct timex t = {ADJ_OFFSET_SINGLESHOT, 0, 0, 0};
+
+	t.offset = (delta > LONG_MAX) ? LONG_MAX : (delta < -LONG_MAX) ? -LONG_MAX : (long)delta;
+	adjtimex(&t);
 }
 
 int64_t date_pending_us(void)
 {
-	int64_t s;
+	struct timex t = {0, 0, 0, 0};
 
-	date_at(task_get_system_time(), &s);
+	adjtimex(&t);
 
-	return date_slew - s;
+	return t.offset;
 }
 
 void date_set_rate_ppb(int32_t ppb)
 {
-	date_anchor();
-	date_rate = ppb;
+	int64_t f = (int64_t)ppb * 65536;
+	struct timex t = {ADJ_FREQUENCY, 0, 0, 0};
+
+	t.freq = (long)((f + ((f < 0) ? -500 : 500)) / 1000); /* ppm << 16 */
+	adjtimex(&t);
 }
 
 int32_t date_rate_ppb(void)
 {
-	return date_rate;
+	struct timex t = {0, 0, 0, 0};
+
+	adjtimex(&t);
+
+	int64_t f = (int64_t)t.freq * 1000;
+
+	return (int32_t)((f + ((f < 0) ? -32768 : 32768)) / 65536);
 }
 
 bool date_is_set(void)
 {
-	return date_valid;
+	struct timex t = {0, 0, 0, 0};
+
+	adjtimex(&t);
+
+	return (t.status & STA_UNSYNC) == 0;
 }
 
 /*
@@ -334,7 +314,7 @@ int date_execute(void *args, int argc, char *argv[])
 	}
 
 	date_format(date_now(), text);
-	printf("%s%s\n", text, date_valid ? "" : " (not set)");
+	printf("%s%s\n", text, date_is_set() ? "" : " (not set)");
 
 	return 0;
 }

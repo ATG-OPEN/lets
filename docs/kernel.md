@@ -196,7 +196,10 @@ A program on LETS - a command in `bin/`, a script, a board's application - uses 
 and the POSIX calls the kernel and the vfs provide underneath, as on Linux: `open`, `read`,
 `write`, `close`, `lseek`, `system`, `malloc`, `free`, and from `lib/posix.h` `chdir`,
 `getcwd`, `mkdir`, `remove`, `rename`, `mount`, `umount`, `sync`, `fsync`, `isatty`, with
-`reboot()` in `kernel/task.h`. stdout (1) is line buffered and stderr (2) is the same stream
+`reboot()` in `kernel/task.h`, `kill`, `stat`, `fstat`, `opendir`, `readdir`,
+`closedir`, `telldir`, `seekdir`, `ioctl`, and the clocks of `kernel/clock.c`:
+`clock_gettime` (CLOCK_MONOTONIC, CLOCK_REALTIME), `clock_settime`, `gettimeofday`,
+`settimeofday`, `adjtime`, `adjtimex`. stdout (1) is line buffered and stderr (2) is the same stream
 unbuffered: a write to 2 says how much a full stream took (0: nothing now, try later), which is
 how `lines.h` and `top` never lose a line on a packet port; `fsync(1)` passes on stdout's line
 first. `isatty(0)` is the terminal mode (`std -t`, `shell -t`): a line ends in "\r\n" there.

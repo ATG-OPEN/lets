@@ -5,6 +5,7 @@
  * Kernel host test: scheduler timing, task memory ownership, nodes, command dispatch and stdout
  * redirection. tasks_start() never returns, so the checks run as tasks and the last one exits.
  */
+#undef clock_gettime /* the PC's own clock (port/host/prelude.h renamed the kernel's) */
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
 #include "../bin/shell.h"

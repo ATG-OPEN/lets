@@ -65,6 +65,13 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   line in a task of its own (`lines_spawn()`), `kill NAME` scans the rows. Takes one directory
   slot (VFS_DIRS_MAX default +1). `-DVFS_PROC=0` (PIC24M, flash full) leaves the mount out:
   `top` asks `vfs_proc_line()` / `vfs_proc_mem()` directly, `kill` uses `task_stop_byname()`.
+- **Clocks** (`kernel/clock.c`): `clock_gettime` (CLOCK_MONOTONIC = the board's clock,
+  CLOCK_REALTIME = UTC), `clock_settime`, `gettimeofday`, `settimeofday`, `adjtime`, `adjtimex`
+  (ADJ_OFFSET_SINGLESHOT slew at most 500 us/s, ADJ_FREQUENCY ppm<<16, STA_UNSYNC until set).
+  `bin/date.c`'s `date_*()` API (drn time app) is kept, on these calls.
+- **stat / dirs**: `stat`, `fstat` (st_mode, st_size, st_ino = which dir/node, st_dev = which fs,
+  0 for a node), `opendir`/`readdir`/`closedir`/`telldir`/`seekdir` (dirent: d_name, d_type,
+  LETS d_hidden), `ioctl(fd, LETS_IOC_ABORT)` (give up a write, old file stays).
 - **VFS_FD_TASK** (0 by default): 1 closes what a task opened when it ends or is killed (each handle
   remembers its opener). Off by default because a command may open a handle and hand it to a task
   it starts; the whole host suite passes with it on. Floor build +117 B, +16 B RAM.
@@ -127,9 +134,6 @@ to the project.
 ## Known issues and TODO
 
 The POSIX line (branch `posix-line`, 2026-11-19), still open:
-- `bin/date.c` (the wall clock: slew, rate, the node `date`) reads `task_get_system_time()`;
-  as Linux's CLOCK_REALTIME it belongs under the line (`clock_gettime`, `clock_settime`,
-  `adjtime`), ~200 B that PIC24M does not have.
 - The shell keeps its kernel calls: `task_streams()` (redirect / terminal of `shell -t`),
   `vfs_stream(0)` (did `std` move the input), `vfs_peer_changed()` (password), `vfs_console()`,
   `task_stop_byname()` for Ctrl-C, the node table for Tab. It is the login and init of LETS.

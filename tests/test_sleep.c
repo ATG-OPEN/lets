@@ -6,6 +6,7 @@
  * read the clock, or no task ever wakes again (the board's link and shell all
  * sleep between calls). The alarm fails the test instead of hanging it.
  */
+#undef clock_gettime /* the PC's own clock (port/host/prelude.h renamed the kernel's) */
 #include "../kernel/task.h"
 #include "../kernel/alloc.h"
 #include "../vfs/vfs.h"

@@ -48,6 +48,13 @@
 #define isatty k_isatty
 #define kill   k_kill
 #define ioctl  k_ioctl
+#define clock_gettime k_clock_gettime
+#define clock_settime k_clock_settime
+#define gettimeofday  k_gettimeofday
+#define settimeofday  k_settimeofday
+#define adjtime	      k_adjtime
+#define adjtimex      k_adjtimex
+#define timex	      k_timex
 #define stat   k_stat
 #define fstat  k_fstat
 #define dirent k_dirent

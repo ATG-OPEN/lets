@@ -23,11 +23,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
 
 #if defined(__XC16__)
 #define __NEED_mode_t
 #define __NEED_ino_t
 #define __NEED_dev_t
+#define __NEED_struct_timeval
+#define __NEED_suseconds_t
+#define __NEED_clockid_t
 #include <bits/alltypes.h>
 #else
 #include <sys/types.h>
@@ -97,6 +101,51 @@ int kill(pid_t pid, int sig);
 #define SIGKILL 9
 #define SIGTERM 15
 #endif
+
+/* -------------------------------------------------------------------------- */
+/* the clocks (kernel/clock.c) */
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_REALTIME	0
+#define CLOCK_MONOTONIC 1
+#endif
+
+/**
+ * @brief CLOCK_MONOTONIC: the time since start-up (the clock the board gave task_initialize(),
+ * us steps); CLOCK_REALTIME: UTC, since 1970 (since the reset until it is set). @return 0.
+ */
+int clock_gettime(clockid_t clock, struct timespec *t);
+/** @brief Sets CLOCK_REALTIME (a step). @return 0, -1 for another clock. */
+int clock_settime(clockid_t clock, const struct timespec *t);
+/** @brief CLOCK_REALTIME in s and us; @p tz is not used. @return 0. */
+int gettimeofday(struct timeval *tv, void *tz);
+/** @brief Sets CLOCK_REALTIME (a step); @p tz is not used. @return 0. */
+int settimeofday(const struct timeval *tv, const void *tz);
+/**
+ * @brief Slews CLOCK_REALTIME by @p delta (at most 500 us a second, it never runs back);
+ * @p olddelta gets what was still to go in. Either may be NULL. A negative tv_sec where time_t
+ * is unsigned (XC16): the 32 bits are taken as signed. @return 0.
+ */
+int adjtime(const struct timeval *delta, struct timeval *olddelta);
+
+#ifndef ADJ_FREQUENCY
+#define ADJ_FREQUENCY	      0x0002
+#define ADJ_OFFSET_SINGLESHOT 0x8001
+#define ADJ_OFFSET_SS_READ    0xa001
+#define STA_UNSYNC	      0x0040
+#define TIME_OK		      0
+#endif
+
+/** What adjtimex() takes and gives (Linux's struct timex: the fields LETS has). */
+struct timex {
+	unsigned int modes; /**< ADJ_OFFSET_SINGLESHOT (offset in), ADJ_FREQUENCY (freq in), or 0. */
+	long offset;	    /**< In: a slew, us (as adjtime()). Out: the slew still to go in. */
+	long freq;	    /**< The rate correction, ppm << 16 (65.536 a ppb). */
+	int status;	    /**< Out: STA_UNSYNC while the time has not been set since the reset. */
+};
+
+/** @brief Linux's adjtimex(2), what LETS's clock has of it. @return TIME_OK. */
+int adjtimex(struct timex *t);
 
 /** @brief Passes on what stdout holds and makes every block device write back what it holds. */
 void sync(void);

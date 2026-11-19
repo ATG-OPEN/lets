@@ -12,6 +12,7 @@
 #include "../bin/shell.h"
 #include "../vfs/vfs.h"
 #include "../lib/posix.h"
+#include "../bin/date.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -182,6 +183,30 @@ static int checks(void *arg, uint64_t now)
 		CHECK(mkdir("/tmp/d", 0) == 0 && rename("/tmp/d", "/tmp/e") == 0 && remove("/tmp/e") == 0);
 		CHECK(isatty(0) == 0 && isatty(1) == 0 && isatty(7) == 0);
 
+		/* the clocks: monotonic from the board's clock, realtime set, slewed, rate-corrected */
+		struct timespec ts;
+		struct timeval tv = {1700000000, 250000};
+		struct timex tx = {0, 0, 0, 0};
+		CHECK(clock_gettime(CLOCK_MONOTONIC, &ts) == 0 && ts.tv_sec == 1 && ts.tv_nsec % 1000 == 0);
+		CHECK(adjtimex(&tx) == TIME_OK && (tx.status & STA_UNSYNC) && !date_is_set());
+		CHECK(settimeofday(&tv, NULL) == 0 && date_is_set() && date_now() == 1700000000u);
+		CHECK(gettimeofday(&tv, NULL) == 0 && tv.tv_sec == 1700000000 && tv.tv_usec >= 250000);
+		CHECK(clock_gettime(CLOCK_REALTIME, &ts) == 0 && ts.tv_sec == 1700000000);
+		CHECK(clock_settime(CLOCK_MONOTONIC, &ts) == -1);
+		for (int ppb = -3000; ppb <= 3000; ppb += 7) {
+			date_set_rate_ppb(ppb);
+			if (date_rate_ppb() != ppb) {
+				CHECK(date_rate_ppb() == ppb);
+				break;
+			}
+		}
+		date_set_rate_ppb(0);
+		date_adjust_us(-4000);
+		CHECK(date_pending_us() <= -3990 && date_pending_us() >= -4000);
+		struct timeval dt = {0, 1000}, old;
+		CHECK(adjtime(&dt, &old) == 0 && adjtime(NULL, &old) == 0);
+		CHECK((long)old.tv_sec * 1000000 + old.tv_usec <= -2990 && (long)old.tv_sec * 1000000 + old.tv_usec >= -3000);
+
 		/* stat, fstat, opendir / readdir / telldir / seekdir, ioctl */
 		struct stat st, st2;
 		CHECK(stat("/", &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & S_IXUSR));
@@ -239,7 +264,7 @@ static int checks(void *arg, uint64_t now)
 			lines++;
 		}
 		CHECK(lines == 6);
-		CHECK(strstr(sink, "\r\nheap ") != NULL);
+		CHECK(strstr(sink, "heap ") != NULL); /* the shell may ask its password in between */
 		CHECK(strstr(sink, "\r\n ID NAME            STATE   RAM    LAST     MAX  PERIOD   CPU\r\n") != NULL);
 		CHECK(strstr(sink, "\r\n  0 shell           ") != NULL && strstr(sink, " top             run ") != NULL);
 

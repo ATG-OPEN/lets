@@ -14,7 +14,7 @@ SAN     = -fsanitize=address,undefined
 PRELUDE = -include port/host/prelude.h
 
 # the kernel, its shell and vfs without tfs (VFS_NO_TFS, as on a small MCU) ...
-KERNEL  = kernel/task.c kernel/alloc.c lib/args.c $(wildcard bin/*.c) \
+KERNEL  = kernel/task.c kernel/clock.c kernel/alloc.c lib/args.c $(wildcard bin/*.c) \
           vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/proc.c vfs/onefs.c
 NOFS    = -DVFS_NO_TFS
 
