@@ -57,6 +57,10 @@
 #define VFS_PROC 1 /**< 1: the kernel's /proc is mounted (vfs/proc.c); 0 leaves it out. */
 #endif
 
+#ifndef VFS_POLL
+#define VFS_POLL 1 /**< 1: poll() can wake a task when a handle gets ready (vfs.c, task.c). */
+#endif
+
 #ifndef VFS_FD_TASK
 /**
  * 1: what a task opened is closed when it ends or is killed, as a process's files on Linux
@@ -213,6 +217,40 @@ struct statvfs {
 
 /** @brief The size and the free bytes of the file system @p path is on. @return 0, or -1 (none, or it cannot tell). */
 int statvfs(const char *path, struct statvfs *buf);
+
+/* -------------------------------------------------------------------------- */
+/* poll() */
+
+#ifndef POLLIN
+#define POLLIN	 0x001
+#define POLLOUT	 0x004
+#define POLLERR	 0x008
+#define POLLHUP	 0x010
+#define POLLNVAL 0x020
+#endif
+
+/** A handle and what poll() is to watch on it. */
+struct pollfd {
+	int fd;
+	short events;  /**< POLLIN, POLLOUT. */
+	short revents; /**< What is ready (POLLNVAL: no such handle). */
+};
+
+typedef unsigned int nfds_t;
+
+/**
+ * @brief Which of @p fds are ready now: POLLIN when there is something to read, POLLOUT when a
+ * write is taken. A task does not wait in it - nothing blocks on LETS: with none ready and
+ * @p timeout not 0, the running task is woken (as if its sleep were over) as soon as one gets
+ * ready, so it returns its sleep from its function:
+ * @code
+ * struct pollfd p = {fd, POLLIN, 0};
+ * if (poll(&p, 1, 1000) == 0) return 1000;   // until there is something, at most 1 s
+ * @endcode
+ * A node tells with its poll handler (vfs_handler_t); one without, and a file, is always ready.
+ * @return How many are ready.
+ */
+int poll(struct pollfd *fds, nfds_t n, int timeout);
 
 /** ioctl() request of LETS: give up a file opened for writing; the file keeps what it had. */
 #define LETS_IOC_ABORT 0x4C01u

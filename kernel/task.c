@@ -62,8 +62,11 @@ static uint8_t task_reason; /* a task_reset_t */
 /* vfs: a new task holds its streams open, one that stopped lets them go */
 extern void vfs_streams_hold(int in, int out) __attribute__((weak));
 extern void vfs_streams_close(int in, int out) __attribute__((weak));
-#if VFS_FD_TASK
-extern void vfs_task_files_close(int slot) __attribute__((weak)); /* what it left open */
+#if VFS_FD_TASK || VFS_POLL
+extern void vfs_task_end(int slot) __attribute__((weak)); /* what it waited for, left open */
+#endif
+#if VFS_POLL
+extern void vfs_poll_wake(void) __attribute__((weak)); /* wakes a task poll() armed */
 #endif
 
 /* the clock given to task_initialize() */
@@ -90,9 +93,9 @@ static void task_release(int i)
 		vfs_streams_close(s.in, s.out);
 	}
 
-#if VFS_FD_TASK
-	if (vfs_task_files_close != NULL) {
-		vfs_task_files_close(i);
+#if VFS_FD_TASK || VFS_POLL
+	if (vfs_task_end != NULL) {
+		vfs_task_end(i);
 	}
 #endif
 }
@@ -260,6 +263,13 @@ static int task_stop_match(const char *name, const void *arg, bool any)
 	}
 
 	return -1;
+}
+
+void task_wake(int slot)
+{
+	if (slot >= 0 && slot < (int)TASKS_MAX_COUNT && tasks[slot].state == TASK_SLEEPING) {
+		tasks[slot].state = TASK_RUNNING;
+	}
 }
 
 /* kill(2): any signal but 0 stops the task, as task_stop_byname() */
@@ -558,6 +568,12 @@ void tasks_start(void)
 		}
 #else
 		port_wdt_kick();
+#endif
+
+#if VFS_POLL
+		if (vfs_poll_wake != NULL) {
+			vfs_poll_wake();
+		}
 #endif
 
 		for (current = 0; current < TASKS_MAX_COUNT; current++) {

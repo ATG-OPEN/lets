@@ -45,6 +45,9 @@
 #define isatty k_isatty
 #define kill   k_kill
 #define ioctl  k_ioctl
+#define poll   k_poll
+#define pollfd k_pollfd
+#define nfds_t k_nfds_t
 #define statvfs k_statvfs
 #define clock_gettime k_clock_gettime
 #define clock_settime k_clock_settime

@@ -461,6 +461,14 @@ static int tty_read(void *args, void *buffer, unsigned int length)
 	return (int)n;
 }
 
+/* poll(): something received; a write is always taken */
+static int tty_poll(void *args, int events)
+{
+	efr32_tty_t *t = args;
+
+	return ((t->rx_head != rx_tail(t)) ? POLLIN : 0) | POLLOUT;
+}
+
 static int tty_execute(void *args, int argc, char *argv[])
 {
 	efr32_tty_t *t = args;
@@ -495,6 +503,7 @@ static const vfs_handler_t tty_node = {
 	.read_handler = tty_read,
 	.write_handler = tty_write,
 	.execute_handler = tty_execute,
+	.poll_handler = tty_poll,
 };
 
 int efr32_tty_register(const char *name, efr32_tty_t *t)

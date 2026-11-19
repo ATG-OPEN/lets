@@ -364,6 +364,17 @@ static int tty_read(void *args, void *buffer, unsigned int length)
 	return (int)n;
 }
 
+/* poll(): something received; a write is always taken (it waits only for what does not fit) */
+static int tty_poll(void *args, int events)
+{
+	tty_args_t *a = args;
+	bool heard = (a->rx_head != a->rx_tail);
+
+	tty_auto(a, heard); /* a port that is polled, not read, still finds its direction */
+
+	return (heard ? POLLIN : 0) | POLLOUT;
+}
+
 static void tty_baud(tty_args_t *a, uint32_t baud)
 {
 	/* BRGH = 1: 4 clocks a bit, of the instruction clock, rounded */
@@ -434,6 +445,7 @@ static const vfs_handler_t tty_node = {
 	.read_handler = tty_read,
 	.write_handler = tty_write,
 	.execute_handler = tty_execute,
+	.poll_handler = tty_poll,
 };
 
 int tty_register_node(char *name, tty_args_t *a)

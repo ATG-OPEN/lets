@@ -24,6 +24,7 @@ static uint64_t system_time_get(void)
 static vfs_handler_t tty = {
 	.read_handler = host_tty_read,
 	.write_handler = host_tty_write,
+	.poll_handler = host_tty_poll,
 };
 
 static uint8_t ee0_mem[32768];

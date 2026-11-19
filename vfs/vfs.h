@@ -92,6 +92,11 @@ typedef struct {
 	int (*close_handler)(void *args);
 	/** Runs the node as a command (see system()). */
 	int (*execute_handler)(void *args, int argc, char *argv[]);
+	/**
+	 * Optional: which of @p events (POLLIN, POLLOUT) the node is ready for now, for poll(); a
+	 * node without one is always ready. Called often while a task waits: keep it short.
+	 */
+	int (*poll_handler)(void *args, int events);
 } vfs_handler_t;
 
 /** One entry of the node table. */

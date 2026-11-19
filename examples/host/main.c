@@ -24,6 +24,7 @@ static uint64_t system_time_get(void)
 static vfs_handler_t tty = {
 	.read_handler = host_tty_read,
 	.write_handler = host_tty_write,
+	.poll_handler = host_tty_poll,
 };
 
 /* the kernel loop never waits; on a PC let the process sleep a little each round */

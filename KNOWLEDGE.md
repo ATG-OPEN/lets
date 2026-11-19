@@ -72,6 +72,11 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
 - **stat / dirs**: `stat`, `fstat` (st_mode, st_size, st_ino = which dir/node, st_dev = which fs,
   0 for a node), `opendir`/`readdir`/`closedir`/`telldir`/`seekdir` (dirent: d_name, d_type,
   LETS d_hidden), `ioctl(fd, LETS_IOC_ABORT)` (give up a write, old file stays).
+- **errno** set by the POSIX calls (the C library's errno). **poll()** (`VFS_POLL` 1): readiness now;
+  with none ready and a timeout, the running task is woken (task_wake()) when one gets ready - it
+  returns its sleep: `if (poll(&p, 1, 1000) == 0) return 1000;`. Nodes tell with
+  `vfs_handler_t.poll_handler` (PIC24/EFR32/nRF52/host ttys have one; none = always ready).
+  /proc/mounts + `statvfs()` (df).
 - **VFS_FD_TASK** (0 by default): 1 closes what a task opened when it ends or is killed (each handle
   remembers its opener). Off by default because a command may open a handle and hand it to a task
   it starts; the whole host suite passes with it on. Floor build +117 B, +16 B RAM.
@@ -137,18 +142,15 @@ The POSIX line (branch `posix-line`, 2026-11-19), still open:
 - The shell keeps its kernel calls: `task_streams()` (redirect / terminal of `shell -t`),
   `vfs_stream(0)` (did `std` move the input), `vfs_peer_changed()` (password), `vfs_console()`,
   `task_stop_byname()` for Ctrl-C, the node table for Tab. It is the login and init of LETS.
-- ls, cat, cp, df, Tab and ed still use `vfs_resolve()`, `vfs_dir_read()`, `vfs_file_*()`,
-  `vfs_mount_get()`: they wait for `stat()`/`fstat()` and `opendir()`/`readdir()`.
 - The task calls (`task_create`, `task_alloc`, `task_stopping`, `shell_wait`) are LETS's process
   calls; `sys`, `lines`, `top`, `reboot`, argscript use them.
-- No `errno`, no `poll()` (a reader polls every few ms); `VFS_FD_TASK` is off by default.
+- `VFS_FD_TASK` is off by default.
 - PIC24M has 9 B of flash left (with `VFS_PROC=0`); DEMO top: 4.8 ms a call (2.2 ms before).
 
 From the 2026-11 code review, open:
 - Nested `system()` (a command run from inside a command): the outer command's `argv` is not
   safe across the inner call.
 - Task ids are reused without a generation number: a stale id can address a newer task.
-- No `errno`: callers get -1 without a reason.
 
 Other:
 - Link-mode prompt after every command (8131f4a, 2026-11-16): a program written for the old

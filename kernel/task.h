@@ -163,6 +163,9 @@ int task_stop_arg(const char *name, const void *arg);
  */
 int kill(pid_t pid, int sig);
 
+/** @brief Ends the sleep of the task in @p slot: it runs on this loop (poll(), vfs.c). */
+void task_wake(int slot);
+
 /** @brief true when the running task has stopped itself and must return. */
 bool task_stopping(void);
 

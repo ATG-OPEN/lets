@@ -12,6 +12,7 @@
 void host_tty_setup(void);
 int host_tty_read(void *args, void *buffer, unsigned int length);
 int host_tty_write(void *args, void *buffer, unsigned int length);
+int host_tty_poll(void *args, int events);
 
 /* microseconds since start (monotonic), for task_initialize() */
 unsigned long long host_time_us(void);

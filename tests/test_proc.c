@@ -71,6 +71,36 @@ static int opener(void *arg, uint64_t now)
 	return 1000;
 }
 
+/* a node poll() watches: ready when the test says */
+static int gate_ready;
+static int gate_poll(void *args, int events)
+{
+	return gate_ready ? POLLIN : 0;
+}
+static int gate_read(void *args, void *buffer, unsigned int length)
+{
+	return 0;
+}
+static const vfs_handler_t gate_node = {.read_handler = gate_read, .poll_handler = gate_poll};
+
+/* waits for the gate with poll(): asleep for long, woken when it opens */
+static int waiter_fd = -1, waiter_runs;
+static uint64_t waiter_woken;
+
+static int waiter(void *arg, uint64_t now)
+{
+	struct pollfd p = {waiter_fd, POLLIN, 0};
+
+	waiter_runs++;
+
+	if (poll(&p, 1, 30000) == 0) {
+		return 30000;
+	}
+
+	waiter_woken = fake_us;
+	return -1;
+}
+
 static int resets;
 
 /* reboot() ends in the port's reset */
@@ -180,6 +210,33 @@ static int checks(void *arg, uint64_t now)
 		CHECK(remove("/tmp/held") == -1 && close(opener_fd) == 0 && remove("/tmp/held") == 0);
 #endif
 
+		/* poll(): ready now, or a task woken when the node gets ready */
+		CHECK(vfs_node_create("gate", false, NULL, &gate_node) >= 0);
+		waiter_fd = open("gate", O_RDONLY, 0);
+		struct pollfd pf[3] = {{waiter_fd, POLLIN, 0}, {99, POLLIN, 0}, {-1, POLLIN, 0}};
+		CHECK(poll(pf, 3, 0) == 1 && pf[0].revents == 0 && pf[1].revents == POLLNVAL && pf[2].revents == 0);
+		task_create("waiter", waiter, NULL);
+		step = -2;
+		return 1;
+	}
+
+	if (step == -2) {
+		static int calls;
+
+		if (++calls == 20) {
+			CHECK(waiter_runs == 1 && waiter_woken == 0); /* asleep: 30 s */
+			gate_ready = 1;
+			return 1;
+		}
+		if (calls < 25) {
+			return 1;
+		}
+		CHECK(waiter_runs == 2 && waiter_woken != 0); /* woken at once, not after 30 s */
+		CHECK(close(waiter_fd) == 0);
+		step = -3;
+	}
+
+	if (step == -3) {
 		/* the command: by name, through the rows */
 		task_create("victim", worker, NULL);
 		CHECK(slot_of("victim") >= 0 && system("kill victim") == 0 && slot_of("victim") == -1);

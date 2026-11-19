@@ -970,6 +970,10 @@ typedef struct {
 #if VFS_FD_TASK
 	int8_t task; /* the task that opened it (-1: main()) */
 #endif
+#if VFS_POLL
+	int8_t waiter;	/* a task poll() wakes when it gets ready, -1: none */
+	uint8_t events; /* what it waits for */
+#endif
 } vfs_fd_t;
 
 #define VFS_FD_PEER 0x80u /* the driver saw a new peer (vfs_peer_new()), not asked yet */
@@ -998,6 +1002,9 @@ static int vfs_fd_new(const vfs_fs_type_t *type, void *fs, void *object, int fla
 			f->flags = (uint8_t)(flags & O_ACCMODE);
 #if VFS_FD_TASK
 			f->task = (int8_t)task_get_current();
+#endif
+#if VFS_POLL
+			f->waiter = -1;
 #endif
 
 			return VFS_FD_FIRST + (int)k;
@@ -1226,18 +1233,86 @@ int vfs_fd_close(int handle)
 	return r;
 }
 
-#if VFS_FD_TASK
-/* the kernel: task @p slot has ended; what it opened and did not close is closed now */
-void vfs_task_files_close(int slot)
+#if VFS_FD_TASK || VFS_POLL
+/* the kernel: task @p slot has ended; it waits for nothing now, and (VFS_FD_TASK) what it
+ * opened and did not close is closed */
+void vfs_task_end(int slot)
 {
 	for (unsigned int k = 0; k < VFS_FDS_MAX; k++) {
-		if (vfs_fds[k].holders > 0 && vfs_fds[k].task == slot) {
-			vfs_fds[k].task = -1; /* its own open only: other holders keep theirs */
+		vfs_fd_t *f = &vfs_fds[k];
+
+#if VFS_POLL
+		f->waiter = (f->waiter == slot) ? -1 : f->waiter;
+#endif
+#if VFS_FD_TASK
+		if (f->holders > 0 && f->task == slot) {
+			f->task = -1; /* its own open only: other holders keep theirs */
 			vfs_fd_close(VFS_FD_FIRST + (int)k);
+		}
+#endif
+	}
+}
+#endif
+
+#if VFS_POLL
+/* what of @p events handle @p handle is ready for: a file always, a node as its poll handler says */
+static int vfs_fd_ready(int handle, int events)
+{
+	vfs_fd_t *f = vfs_fd(handle);
+
+	if (f == NULL) {
+		return POLLNVAL;
+	}
+
+	if (f->type == NULL) {
+		vfs_node_t *n = vfs_fd_serve(handle);
+
+		if (n->handlers->poll_handler != NULL) {
+			return n->handlers->poll_handler(n->args, events) & events;
+		}
+	}
+
+	return events & (POLLIN | POLLOUT);
+}
+
+int poll(struct pollfd *fds, nfds_t n, int timeout)
+{
+	int ready = 0;
+
+	for (nfds_t i = 0; i < n; i++) {
+		int handle = vfs_stream(fds[i].fd);
+
+		fds[i].revents = (fds[i].fd < 0) ? 0 : (short)vfs_fd_ready(handle, fds[i].events);
+		ready += (fds[i].revents != 0);
+	}
+
+	/* none: the running task is woken when one gets ready (vfs_poll_wake()) */
+	for (nfds_t i = 0; ready == 0 && timeout != 0 && task_get_current() >= 0 && i < n; i++) {
+		vfs_fd_t *f = vfs_fd(vfs_stream(fds[i].fd));
+
+		if (f != NULL) {
+			f->waiter = (int8_t)task_get_current();
+			f->events = (uint8_t)fds[i].events;
+		}
+	}
+
+	return ready;
+}
+
+/* the kernel, once a loop: a task that waits for a handle that got ready runs again */
+void vfs_poll_wake(void)
+{
+	for (unsigned int k = 0; k < VFS_FDS_MAX; k++) {
+		int8_t slot = vfs_fds[k].waiter;
+
+		if (slot >= 0 && vfs_fd_ready(VFS_FD_FIRST + (int)k, vfs_fds[k].events) != 0) {
+			vfs_task_end(slot); /* it waits for nothing more */
+			task_wake(slot);
 		}
 	}
 }
 #endif
+
 
 int vfs_file_abort(int handle)
 {

@@ -5,6 +5,7 @@
 #include "host_tty.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <fcntl.h>
 #include <time.h>
 #include <unistd.h>
@@ -23,6 +24,16 @@ int host_tty_read(void *args, void *buffer, unsigned int length)
 		return 0;
 	}
 	return (int)n;
+}
+
+/* poll(): the terminal has keys (the kernel's POLLIN / POLLOUT are the same numbers as the PC's) */
+int host_tty_poll(void *args, int events)
+{
+	struct pollfd p = {STDIN_FILENO, POLLIN, 0};
+
+	(void)args;
+
+	return ((poll(&p, 1, 0) > 0 && (p.revents & POLLIN)) ? POLLIN : 0) | POLLOUT;
 }
 
 int host_tty_write(void *args, void *buffer, unsigned int length)

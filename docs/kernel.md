@@ -199,7 +199,27 @@ and the POSIX calls the kernel and the vfs provide underneath, as on Linux: `ope
 `reboot()` in `kernel/task.h`, `kill`, `stat`, `fstat`, `opendir`, `readdir`,
 `closedir`, `telldir`, `seekdir`, `ioctl`, and the clocks of `kernel/clock.c`:
 `clock_gettime` (CLOCK_MONOTONIC, CLOCK_REALTIME), `clock_settime`, `gettimeofday`,
-`settimeofday`, `adjtime`, `adjtimex`. stdout (1) is line buffered and stderr (2) is the same stream
+`settimeofday`, `adjtime`, `adjtimex`, `statvfs`, `poll`, and `errno`.
+
+poll() does not block (nothing does on LETS): with nothing ready and a timeout it arms a wake-up,
+and the task returns its sleep; the kernel runs it again as soon as a handle it watches gets ready.
+
+```c
+static int reader(void *arg, uint64_t now)
+{
+	struct pollfd p = {fd, POLLIN, 0};
+
+	if (poll(&p, 1, 1000) == 0) {
+		return 1000;          /* until there is something, at most 1 s */
+	}
+
+	n = read(fd, buf, sizeof(buf));
+	...
+}
+```
+
+A driver tells poll() with the `poll_handler` of its `vfs_handler_t` (POLLIN when it has
+received something); a node without one, and a file, is always ready. stdout (1) is line buffered and stderr (2) is the same stream
 unbuffered: a write to 2 says how much a full stream took (0: nothing now, try later), which is
 how `lines.h` and `top` never lose a line on a packet port; `fsync(1)` passes on stdout's line
 first. `isatty(0)` is the terminal mode (`std -t`, `shell -t`): a line ends in "\r\n" there.
