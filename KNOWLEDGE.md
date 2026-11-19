@@ -107,7 +107,7 @@ make docs         # Doxygen into build/docs/html
 make format       # Linux kernel style, 100 columns
 ```
 
-On an MCU: add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`,
+On an MCU: add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`, `vfs/proc.c`,
 `lib/args.c` (+ `opt/` nodes, `vfs/tfs.c` and `vfs/dev/` drivers when file systems are wanted)
 to the project.
 
@@ -125,6 +125,20 @@ to the project.
 - [ ] A new port (`port/X`): `docs/porting.md`, tests where possible; `port_wdt_*` hooks.
 
 ## Known issues and TODO
+
+The POSIX line (branch `posix-line`, 2026-11-19), still open:
+- `bin/date.c` (the wall clock: slew, rate, the node `date`) reads `task_get_system_time()`;
+  as Linux's CLOCK_REALTIME it belongs under the line (`clock_gettime`, `clock_settime`,
+  `adjtime`), ~200 B that PIC24M does not have.
+- The shell keeps its kernel calls: `task_streams()` (redirect / terminal of `shell -t`),
+  `vfs_stream(0)` (did `std` move the input), `vfs_peer_changed()` (password), `vfs_console()`,
+  `task_stop_byname()` for Ctrl-C, the node table for Tab. It is the login and init of LETS.
+- ls, cat, cp, df, Tab and ed still use `vfs_resolve()`, `vfs_dir_read()`, `vfs_file_*()`,
+  `vfs_mount_get()`: they wait for `stat()`/`fstat()` and `opendir()`/`readdir()`.
+- The task calls (`task_create`, `task_alloc`, `task_stopping`, `shell_wait`) are LETS's process
+  calls; `sys`, `lines`, `top`, `reboot`, argscript use them.
+- No `errno`, no `poll()` (a reader polls every few ms); `VFS_FD_TASK` is off by default.
+- PIC24M has 9 B of flash left (with `VFS_PROC=0`); DEMO top: 4.8 ms a call (2.2 ms before).
 
 From the 2026-11 code review, open:
 - Nested `system()` (a command run from inside a command): the outer command's `argv` is not
@@ -151,6 +165,12 @@ Other:
 - The default shell password `123456` is public: every product must set its own.
 
 ## History
+
+- 2026-11-19 (branch `posix-line`): programs above a POSIX line. Chip code only in `port/*`
+  (stack hooks, `reboot()`, PIC24 tty/uuid/flash24 moved); /tmp under vfs; the file commands and
+  ed in `bin/`; `lib/posix.h` (chdir, getcwd, mkdir, remove, rename, mount, umount, sync, fsync,
+  isatty, kill); /proc (`VFS_PROC`) for top and kill; argscript without kernel internals;
+  `VFS_FD_TASK`. Board projects change paths (README "On the MCU").
 
 - 2026-11: published (Apache 2.0); shell password and new-peer signal; `;` in the shell (4926db7);
   review fixes (43f8561); link-mode prompt (8131f4a).

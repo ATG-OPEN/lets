@@ -77,12 +77,15 @@ same with file systems: try `ls /`, `ls -l /dev`, `cd /mnt/ee`, `echo hi > f`, `
 
 ## On the MCU
 
-Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`,
+Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`, `vfs/proc.c`,
 `lib/args.c` and `port/pic24/wdt.c` (the watchdog, reset-cause and stack hooks; needed with or without
 `LETS_WDT`) to your MPLAB X project (XC16), plus any `opt/` node your board uses (the PIC24 UART
 `opt/tty.h` is `port/pic24/tty.c`; the device ID is `port/pic24/uuid.c`). Without
 tfs define `VFS_NO_TFS`; with it add `vfs/tfs.c`, `vfs/tfsvfs.c` and the memory drivers from
-`vfs/dev/`. Declare the heap once and boot:
+`vfs/dev/` (`vfs/dev/flash24.c` with `port/pic24/flash24.c`). A project from before 2026-11-19
+changes: `bin/tmp.c` -> `vfs/tmp.c`, `vfs/bin.c` -> `bin/bin.c`, `vfs/ed.c` -> `bin/ed.c`,
+`opt/tty.c` -> `port/pic24/tty.c`, `lib/uuid.c` -> `port/pic24/uuid.c`, and adds `vfs/proc.c`
+(a full one builds with `-DVFS_PROC=0`). Declare the heap once and boot:
 
 ```c
 ALLOC_INIT_HEAP(4096);
