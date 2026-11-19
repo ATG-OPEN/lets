@@ -82,6 +82,26 @@ static int gate_read(void *args, void *buffer, unsigned int length)
 }
 static const vfs_handler_t gate_node = {.read_handler = gate_read, .poll_handler = gate_poll};
 
+/* a file system whose files are ready when the test says (the type's poll op) */
+static int pfs_ready;
+static int pfs_token;
+static void *pfs_mount(const char *source, bool format) { return &pfs_token; }
+static void pfs_umount(void *fs) {}
+static int pfs_info(void *fs, const char *name, vfs_info_t *info) { return -1; }
+static int pfs_dir(void *fs, uint16_t *index, char *name, vfs_info_t *info) { return -1; }
+static void *pfs_open(void *fs, const char *name, int flags) { return &pfs_token; }
+static int pfs_read(void *file, void *buffer, unsigned int length) { return 0; }
+static int pfs_write(void *file, const void *buffer, unsigned int length) { return (int)length; }
+static int pfs_close(void *file) { return 0; }
+static int pfs_remove(void *fs, const char *name) { return -1; }
+static int pfs_poll(void *file, int events) { return pfs_ready ? POLLIN : POLLOUT; }
+static const char *pfs_source(void *fs) { return "pfs"; }
+static vfs_fs_type_t pfs_type = {
+	.name = "pfs", .mount = pfs_mount, .umount = pfs_umount, .info = pfs_info, .dir = pfs_dir,
+	.open = pfs_open, .read = pfs_read, .write = pfs_write, .close = pfs_close, .remove = pfs_remove,
+	.source = pfs_source, .poll = pfs_poll,
+};
+
 /* waits for the gate with poll(): asleep for long, woken when it opens */
 static int waiter_fd = -1, waiter_runs;
 static uint64_t waiter_woken;
@@ -222,6 +242,16 @@ static int checks(void *arg, uint64_t now)
 		}
 		CHECK(waiter_runs == 2 && waiter_woken != 0); /* woken at once, not after 30 s */
 		CHECK(close(waiter_fd) == 0);
+
+		/* a file of a file system with a poll op: ready as the type says */
+		CHECK(vfs_fs_register(&pfs_type) == 0 && mount("x", "/pfs", "pfs", 0, NULL) == 0);
+		int pfd = open("/pfs/a", O_RDWR, 0);
+		struct pollfd pp = {pfd, POLLIN | POLLOUT, 0};
+		CHECK(pfd >= 0 && poll(&pp, 1, 0) == 1 && pp.revents == POLLOUT);
+		pfs_ready = 1;
+		pp.events = POLLIN;
+		CHECK(poll(&pp, 1, 0) == 1 && pp.revents == POLLIN);
+		CHECK(close(pfd) == 0 && umount("/pfs") == 0);
 		step = -3;
 	}
 

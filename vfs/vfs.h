@@ -288,6 +288,8 @@ typedef struct {
  * A file system names its files with plain names (no '/'). The ops marked
  * optional may be NULL. Flags are open()'s (O_WRONLY, O_CREAT, ...).
  */
+#define VFS_FS_POLL 1 /**< vfs_fs_type_t has the poll op (code built for older LETS can test it) */
+
 typedef struct vfs_fs_type {
 	const char *name; /**< `mount -t` name: "tfs", "one". */
 	/** Mounts @p source (a device, or whatever the type understands); the file system or NULL. */
@@ -318,6 +320,11 @@ typedef struct vfs_fs_type {
 	int (*usage)(void *fs, uint32_t *size, uint32_t *avail);
 	/** What was mounted, for df and mount: the device's name, "router", ... */
 	const char *(*source)(void *fs);
+	/**
+	 * Optional: what of @p events (POLLIN, POLLOUT) the open file is ready for now, for poll();
+	 * NULL: always ready (a file of a disk). The kernel asks again once a loop while a task waits.
+	 */
+	int (*poll)(void *file, int events);
 	struct vfs_fs_type *next; /**< Set by vfs_fs_register(). */
 } vfs_fs_type_t;
 

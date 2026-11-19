@@ -1255,7 +1255,8 @@ void vfs_task_end(int slot)
 #endif
 
 #if VFS_POLL
-/* what of @p events handle @p handle is ready for: a file always, a node as its poll handler says */
+/* what of @p events handle @p handle is ready for: a node as its poll handler says, a file as its
+   type's poll op (none: always) */
 static int vfs_fd_ready(int handle, int events)
 {
 	vfs_fd_t *f = vfs_fd(handle);
@@ -1270,6 +1271,9 @@ static int vfs_fd_ready(int handle, int events)
 		if (n->handlers->poll_handler != NULL) {
 			return n->handlers->poll_handler(n->args, events) & events;
 		}
+	}
+	else if (f->type->poll != NULL) {
+		return f->type->poll(f->object, events) & events;
 	}
 
 	return events & (POLLIN | POLLOUT);
