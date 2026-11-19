@@ -378,6 +378,27 @@ void vfs_proc_mem(void)
 
 #if VFS_PROC
 
+/* /proc/mounts, as Linux's: "source path type" a line, each mounted file system */
+static void proc_mounts(proc_text_t *t)
+{
+	char path[VFS_PATH_MAX];
+
+	for (int i = VFS_DIR_FIRST; i < VFS_DIR_FIRST + (int)VFS_DIRS_MAX; i++) {
+		const vfs_fs_type_t *type;
+		void *fs = vfs_mount_get((uint8_t)i, &type);
+
+		if (fs != NULL && vfs_dir_path((uint8_t)i, path, sizeof(path)) == 0) {
+			proc_printf(t, "%s %s %s\n", type->source(fs), path, type->name);
+		}
+	}
+}
+
+/* /proc/mem and /proc/mounts: of any length, counted before they are made */
+static bool proc_counted(const char *name)
+{
+	return strcmp(name, "mem") == 0 || strcmp(name, "mounts") == 0;
+}
+
 /* the line of `top` file @p name is ("stat", "meminfo", a task slot "0" ...), -1 for none */
 static int proc_name(const char *name)
 {
@@ -406,6 +427,11 @@ static int proc_text(const char *name, char *buf, unsigned int max)
 
 	if (strcmp(name, "mem") == 0) {
 		return proc_mem_text(buf, t.max);
+	}
+
+	if (strcmp(name, "mounts") == 0) {
+		proc_mounts(&t);
+		return (int)t.n;
 	}
 
 	int made = (line < 0) ? -1 : proc_line(&t, (unsigned int)line);
@@ -440,7 +466,7 @@ static int proc_info(void *fs, const char *name, vfs_info_t *info)
 {
 	int line = proc_name(name);
 
-	if (strcmp(name, "mem") != 0 &&
+	if (!proc_counted(name) &&
 	    (line < 0 || (line >= 2 && (line - 2 >= (int)TASKS_MAX_COUNT ||
 					task_get_data()[line - 2].state == TASK_UNUSED)))) {
 		return -1;
@@ -451,18 +477,18 @@ static int proc_info(void *fs, const char *name, vfs_info_t *info)
 	return 0;
 }
 
-/* stat, meminfo, mem, then the task slots in use */
+/* stat, meminfo, mem, mounts, then the task slots in use */
 static int proc_dir(void *fs, uint16_t *index, char *name, vfs_info_t *info)
 {
-	static const char *const files[] = {"stat", "meminfo", "mem"};
+	static const char *const files[] = {"stat", "meminfo", "mem", "mounts"};
 
 	for (;; (*index)++) {
 		uint16_t i = *index;
 
-		if (i < 3u) {
+		if (i < 4u) {
 			strcpy(name, files[i]);
-		} else if (i < 3u + TASKS_MAX_COUNT) {
-			unsigned int k = i - 3u;
+		} else if (i < 4u + TASKS_MAX_COUNT) {
+			unsigned int k = i - 4u;
 
 			name[0] = (char)('0' + k / 10u);
 			name[1] = (char)('0' + k % 10u);
@@ -491,7 +517,7 @@ static int proc_dir(void *fs, uint16_t *index, char *name, vfs_info_t *info)
 static void *proc_open(void *fs, const char *name, int flags)
 {
 	vfs_info_t info;
-	int n = (strcmp(name, "mem") == 0) ? proc_text(name, NULL, 0) + PROC_SLACK : PROC_LINE;
+	int n = proc_counted(name) ? proc_text(name, NULL, 0) + PROC_SLACK : PROC_LINE;
 
 	if (proc_info(fs, name, &info) < 0 || (flags & O_ACCMODE) != O_RDONLY) {
 		return NULL; /* not there (no O_CREAT here), or not for reading */

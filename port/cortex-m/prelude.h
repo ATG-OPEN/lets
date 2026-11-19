@@ -48,6 +48,7 @@
 #define isatty k_isatty
 #define kill   k_kill
 #define ioctl  k_ioctl
+#define statvfs k_statvfs
 #define clock_gettime k_clock_gettime
 #define clock_settime k_clock_settime
 #define gettimeofday  k_gettimeofday

@@ -131,6 +131,12 @@ static int checks(void *arg, uint64_t now)
 		CHECK(fd >= 0 && read(fd, buf, 5) == 5 && strncmp(buf, "heap ", 5) == 0 && close(fd) == 0);
 		CHECK(open("/proc/stat", O_WRONLY, 0) < 0 && open("/proc/99", O_RDONLY, 0) < 0);
 		CHECK(remove("/proc/stat") == -1 && umount("/proc") == 0 && mount("proc", "/proc", "proc", 0, NULL) == 0);
+		struct statvfs sv;
+		fd = open("/proc/mounts", O_RDONLY, 0);
+		n = (fd < 0) ? -1 : read(fd, buf, sizeof(buf) - 1);
+		buf[(n < 0) ? 0 : n] = '\0';
+		CHECK(close(fd) == 0 && strcmp(buf, "proc /proc proc\n") == 0);
+		CHECK(statvfs("/proc", &sv) == -1 && statvfs("/nothing", &sv) == -1);
 #else
 		CHECK(n == -1); /* no /proc */
 #endif

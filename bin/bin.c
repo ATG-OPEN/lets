@@ -596,34 +596,50 @@ static int bin_cp(void *args, int argc, char *argv[])
 /* df: every mounted file system: what is mounted, size, used and free bytes, where */
 static int bin_df(void *args, int argc, char *argv[])
 {
-	char path[VFS_PATH_MAX];
 	int count = 0;
+	int fd = open("/proc/mounts", O_RDONLY, 0);
+	off_t size = (fd < 0) ? 0 : lseek(fd, 0, SEEK_END);
+	char *text = (size > 0) ? malloc((size_t)size + 1u) : NULL;
 
 	printf("%-10s %-5s %9s %9s %9s  %s\n", "Device", "Type", "Size", "Used", "Avail", "Mounted on");
 
-	for (int i = VFS_DIR_FIRST; i < VFS_DIR_FIRST + (int)VFS_DIRS_MAX; i++) {
-		const vfs_fs_type_t *type;
-		void *fs = vfs_mount_get((uint8_t)i, &type);
-		uint32_t size, avail;
+	if (text != NULL && lseek(fd, 0, SEEK_SET) == 0 && read(fd, text, (unsigned int)size) == size) {
+		text[size] = '\0';
 
-		/* /proc holds no files of its own, as on Linux */
-		if (fs == NULL || vfs_dir_path((uint8_t)i, path, sizeof(path)) < 0 ||
-		    (VFS_PROC && strcmp(type->name, "proc") == 0)) {
-			continue;
+		/* "source path type" a line, as Linux's /proc/mounts */
+		for (char *line = strtok(text, "\n"); line != NULL; line = strtok(NULL, "\n")) {
+			char *source = line;
+			char *path = strchr(source, ' ');
+			char *type = (path == NULL) ? NULL : strchr(path + 1, ' ');
+			struct statvfs v;
+
+			if (type == NULL) {
+				continue;
+			}
+
+			*path++ = '\0';
+			*type++ = '\0';
+
+			/* /proc holds no files of its own, as on Linux */
+			if (strcmp(type, "proc") == 0) {
+				continue;
+			}
+
+			printf("%-10s %-5s ", source, type);
+
+			if (statvfs(path, &v) == 0) {
+				printf("%9lu %9lu %9lu", v.f_blocks, v.f_blocks - v.f_bavail, v.f_bavail);
+			} else {
+				printf("%9s %9s %9s", "-", "-", "-");
+			}
+
+			printf("  %s\n", path);
+			count++;
 		}
-
-		printf("%-10s %-5s ", type->source(fs), type->name);
-
-		if (type->usage != NULL && type->usage(fs, &size, &avail) == 0) {
-			printf("%9lu %9lu %9lu", (unsigned long)size, (unsigned long)(size - avail),
-			       (unsigned long)avail);
-		} else {
-			printf("%9s %9s %9s", "-", "-", "-");
-		}
-
-		printf("  %s\n", path);
-		count++;
 	}
+
+	free(text);
+	close(fd);
 
 	return count;
 }

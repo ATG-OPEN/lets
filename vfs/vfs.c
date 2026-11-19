@@ -556,6 +556,26 @@ int stat(const char *path, struct stat *st)
 	return 0;
 }
 
+int statvfs(const char *path, struct statvfs *buf)
+{
+	vfs_path_t p;
+	const vfs_fs_type_t *type;
+	uint32_t size, avail;
+	void *fs = (vfs_resolve(path, &p) < 0) ? NULL : vfs_mount_get(p.dir, &type);
+
+	if (fs == NULL || type->usage == NULL || type->usage(fs, &size, &avail) < 0) {
+		return -1;
+	}
+
+	buf->f_bsize = 1;
+	buf->f_frsize = 1;
+	buf->f_blocks = size;
+	buf->f_bfree = avail;
+	buf->f_bavail = avail;
+
+	return 0;
+}
+
 /* a directory a program reads */
 struct lets_dir {
 	uint8_t dir;

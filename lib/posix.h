@@ -202,6 +202,18 @@ int stat(const char *path, struct stat *st);
 /** @brief What the open handle @p fd is (0, 1, 2: the task's streams); no size. @return 0 or -1. */
 int fstat(int fd, struct stat *st);
 
+/** What statvfs() tells, in bytes (f_bsize 1). */
+struct statvfs {
+	unsigned long f_bsize;	/**< 1: the counts are bytes. */
+	unsigned long f_frsize; /**< 1. */
+	unsigned long f_blocks; /**< The file system's size. */
+	unsigned long f_bfree;	/**< Free. */
+	unsigned long f_bavail; /**< Free, for anyone (the same). */
+};
+
+/** @brief The size and the free bytes of the file system @p path is on. @return 0, or -1 (none, or it cannot tell). */
+int statvfs(const char *path, struct statvfs *buf);
+
 /** ioctl() request of LETS: give up a file opened for writing; the file keeps what it had. */
 #define LETS_IOC_ABORT 0x4C01u
 
