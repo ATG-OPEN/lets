@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #define open   k_open
 #define read   k_read
@@ -46,6 +47,16 @@
 #define fsync  k_fsync
 #define isatty k_isatty
 #define kill   k_kill
+#define ioctl  k_ioctl
+#define stat   k_stat
+#define fstat  k_fstat
+#define dirent k_dirent
+#define DIR    k_DIR
+#define opendir	 k_opendir
+#define readdir	 k_readdir
+#define closedir k_closedir
+#define telldir	 k_telldir
+#define seekdir	 k_seekdir
 
 /* the kernel's heap has no calloc / realloc */
 #define calloc	k_calloc_is_not_in_the_kernel

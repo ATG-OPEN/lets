@@ -26,6 +26,8 @@
 
 #if defined(__XC16__)
 #define __NEED_mode_t
+#define __NEED_ino_t
+#define __NEED_dev_t
 #include <bits/alltypes.h>
 #else
 #include <sys/types.h>
@@ -113,5 +115,86 @@ int remove(const char *path);
 
 /** @brief Renames or moves within one file system or within the node table (<stdio.h>'s). @return 0 or -1. */
 int rename(const char *from, const char *to);
+
+/* -------------------------------------------------------------------------- */
+/* what a path is: stat() */
+
+#ifndef S_IFMT
+#define S_IFMT	0170000
+#define S_IFDIR 0040000
+#define S_IFCHR 0020000
+#define S_IFBLK 0060000
+#define S_IFREG 0100000
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#define S_ISCHR(m) (((m) & S_IFMT) == S_IFCHR)
+#define S_ISBLK(m) (((m) & S_IFMT) == S_IFBLK)
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#define S_IRUSR 0400
+#define S_IWUSR 0200
+#define S_IXUSR 0100
+#endif
+
+/**
+ * What stat() tells: the type and what can be done (S_IRUSR / S_IWUSR / S_IXUSR from the node's
+ * handlers; a file rw-, a directory rwx, a built-in command --x) and the size. A file of a file
+ * system and a RAM file are S_IFREG (they end), a node a device: S_IFCHR, S_IFBLK for a block
+ * device (vfs_blk_register()).
+ */
+struct stat {
+	mode_t st_mode;
+	off_t st_size;
+	ino_t st_ino; /**< Which directory or node it is (two paths to one compare equal). */
+	dev_t st_dev; /**< A file of a mounted file system: which one (not 0); 0 for a node. */
+};
+
+/** @brief What @p path is. @return 0, or -1 when there is nothing there. */
+int stat(const char *path, struct stat *st);
+
+/** @brief What the open handle @p fd is (0, 1, 2: the task's streams); no size. @return 0 or -1. */
+int fstat(int fd, struct stat *st);
+
+/** ioctl() request of LETS: give up a file opened for writing; the file keeps what it had. */
+#define LETS_IOC_ABORT 0x4C01u
+
+/**
+ * @brief Device control: @p request LETS_IOC_ABORT gives up @p fd without committing it (a
+ * file opened with O_TRUNC keeps its old content; a node's close handler is not called).
+ * @return 0, or -1 (another request, or no such handle).
+ */
+int ioctl(int fd, unsigned long request, ...);
+
+/* -------------------------------------------------------------------------- */
+/* directories: opendir(), readdir(), closedir() */
+
+#ifndef DT_UNKNOWN
+#define DT_UNKNOWN 0
+#define DT_CHR	   2
+#define DT_DIR	   4
+#define DT_BLK	   6
+#define DT_REG	   8
+#endif
+
+#define LETS_NAME_MAX 16 /**< A name's bytes in a directory, with its 0. */
+
+/** One entry of a directory, from readdir(). */
+struct dirent {
+	char d_name[LETS_NAME_MAX];
+	unsigned char d_type; /**< DT_DIR, DT_REG, DT_CHR or DT_BLK. */
+	/** LETS: a node made hidden (or a file named ".x"); `ls` shows it with -a, and always in /bin. */
+	unsigned char d_hidden;
+};
+
+typedef struct lets_dir DIR;
+
+/** @brief Opens directory @p path (a heap block, freed by closedir()); NULL when it is none. */
+DIR *opendir(const char *path);
+/** @brief The next entry, NULL after the last; valid until the next call. */
+struct dirent *readdir(DIR *dir);
+/** @brief Frees @p dir. @return 0. */
+int closedir(DIR *dir);
+/** @brief Where readdir() is, for seekdir(): a listing can be closed and opened again there. */
+long telldir(DIR *dir);
+/** @brief Goes back to where telldir() said. */
+void seekdir(DIR *dir, long at);
 
 #endif /* LETS_POSIX_H */

@@ -37,73 +37,119 @@ static int bin_bad(void)
  * d directory, - file (also a RAM file or a command), c device, b block
  * device; r / w / x from what the file or node can do.
  */
-static unsigned int bin_ls_long(const vfs_dirent_t *e, char *line, unsigned int max)
+static unsigned int bin_ls_long(const char *name, const struct stat *st, char *line,
+				unsigned int max)
 {
-	char mode[5] = "-rw-";
+	char mode[5];
 
-	if (e->kind == VFS_DIR) {
-		strcpy(mode, "drwx");
-	} else if (e->kind == VFS_NODE && e->node < 0) {
-		strcpy(mode, "---x"); /* a built-in command */
-	} else if (e->kind == VFS_NODE) {
-		vfs_node_t *n = vfs_nodes_get() + e->node;
-		const vfs_handler_t *h = n->handlers;
-		bool device = (h->read_handler || h->write_handler) && tmp_file_size(n) < 0;
+	mode[0] = S_ISDIR(st->st_mode) ? 'd' : S_ISCHR(st->st_mode) ? 'c' : S_ISBLK(st->st_mode) ? 'b' : '-';
+	mode[1] = (st->st_mode & S_IRUSR) ? 'r' : '-';
+	mode[2] = (st->st_mode & S_IWUSR) ? 'w' : '-';
+	mode[3] = (st->st_mode & S_IXUSR) ? 'x' : '-';
+	mode[4] = '\0';
 
-		mode[0] = e->block ? 'b' : device ? 'c' : '-';
-		mode[1] = h->read_handler ? 'r' : '-';
-		mode[2] = h->write_handler ? 'w' : '-';
-		mode[3] = h->execute_handler ? 'x' : '-';
-	}
-
-	int n = snprintf(line, max, "%s %6lu %s\n", mode, (unsigned long)e->size, e->name);
+	int n = snprintf(line, max, "%s %6lu %s\n", mode, (unsigned long)st->st_size, name);
 
 	return (n < 0) ? 0 : ((unsigned int)n >= max) ? max - 1u : (unsigned int)n;
+}
+
+/* @p dir, then '/' unless it ends in one, then @p name, in @p full (VFS_PATH_MAX) */
+static char *bin_join(char *full, const char *dir, const char *name)
+{
+	size_t n = strlen(dir);
+
+	if (n + strlen(name) + 2u > VFS_PATH_MAX) {
+		return NULL;
+	}
+
+	strcpy(full, dir);
+
+	if (n > 0 && dir[n - 1] != '/') {
+		strcat(full, "/");
+	}
+
+	return strcat(full, name);
+}
+
+/* whether ls shows entry @p e: a hidden one with -a, or in /bin, where the commands are */
+static bool bin_shown(const struct dirent *e, bool all, bool bin)
+{
+	return !e->d_hidden || all || bin;
+}
+
+/* whether @p path is /bin: the same directory (st_ino) */
+static bool bin_is_bin(const char *path)
+{
+	struct stat a, b;
+
+	return stat(path, &a) == 0 && stat("/bin", &b) == 0 && a.st_ino == b.st_ino;
 }
 
 /*
  * The entries of a directory, a line (ls -l) or a few names at a time
  * (lines.h), so a stream that takes only a few packets at once gets them all.
+ * The directory is opened for each piece, and read on from where the last one ended.
  */
 typedef struct {
 	lines_t lines;
-	uint16_t index; /* the next entry */
+	long at;	/* telldir(): the next entry */
 	uint16_t count; /* entries shown so far */
-	uint8_t dir;
-	bool all, list, slash, done, ended;
+	bool all, list, slash, bin, done, ended;
+	char path[];
 } bin_ls_t;
 
 static unsigned int bin_ls_next(lines_t *l, char *piece, unsigned int max)
 {
 	bin_ls_t *s = (bin_ls_t *)l;
 	unsigned int n = 0;
-	vfs_dirent_t e;
+	DIR *d = s->done ? NULL : opendir(s->path);
+	struct dirent *e;
+
+	if (!s->done && d == NULL) {
+		return LINES_LATER; /* no heap now */
+	}
+
+	if (d != NULL) {
+		seekdir(d, s->at);
+	}
 
 	while (!s->done) {
-		uint16_t before = s->index;
+		long before = telldir(d);
 
-		if (vfs_dir_read(s->dir, &s->index, &e) != 0) {
+		if ((e = readdir(d)) == NULL) {
 			s->done = true;
 			break;
 		}
 
-		/* commands are hidden, but /bin is where they are listed */
-		if (e.hidden && !s->all && s->dir != VFS_BIN) {
+		if (!bin_shown(e, s->all, s->bin)) {
 			continue;
 		}
 
 		if (s->list) {
+			char full[VFS_PATH_MAX];
+			struct stat st;
+
+			s->at = telldir(d);
 			s->count++;
-			return bin_ls_long(&e, piece, max);
+
+			if (bin_join(full, s->path, e->d_name) == NULL || stat(full, &st) < 0) {
+				memset(&st, 0, sizeof(st));
+			}
+
+			n = bin_ls_long(e->d_name, &st, piece, max);
+			closedir(d);
+			return n;
 		}
 
 		/* "  name/": the next names on one line, as many as the piece takes */
-		unsigned int w = (unsigned int)strlen(e.name);
-		unsigned int need = (s->count > 0 ? 2u : 0u) + w + (s->slash && e.kind == VFS_DIR) + 1u;
+		bool dir = s->slash && e->d_type == DT_DIR;
+		unsigned int w = (unsigned int)strlen(e->d_name);
+		unsigned int need = (s->count > 0 ? 2u : 0u) + w + dir + 1u;
 
 		if (n + need > max) {
 			if (n > 0) {
-				s->index = before; /* this one starts the next piece */
+				s->at = before; /* this one starts the next piece */
+				closedir(d);
 				return n;
 			}
 
@@ -115,13 +161,15 @@ static unsigned int bin_ls_next(lines_t *l, char *piece, unsigned int max)
 			piece[n++] = ' ';
 		}
 
-		memcpy(piece + n, e.name, w);
+		memcpy(piece + n, e->d_name, w);
 		n += w;
 
-		if (s->slash && e.kind == VFS_DIR) {
+		if (dir) {
 			piece[n++] = '/';
 		}
 	}
+
+	closedir(d);
 
 	/* the end of the names' line */
 	if (!s->list && s->count > 0 && !s->ended) {
@@ -159,63 +207,46 @@ static int bin_ls(void *args, int argc, char *argv[])
 		}
 	}
 
-	vfs_path_t p;
+	struct stat st;
 
-	if (vfs_resolve(path, &p) < 0 || p.kind == VFS_NONE) {
+	if (stat(path, &st) < 0) {
 		printf("not found\n");
 		return -1;
 	}
 
-	vfs_dirent_t e;
-	int count = 0;
-
-	if (p.kind != VFS_DIR) {
+	if (!S_ISDIR(st.st_mode)) {
 		/* one file or node */
-		memset(&e, 0, sizeof(e));
-		strcpy(e.name, p.name);
-		e.kind = p.kind;
-		e.node = p.node;
+		const char *name = strrchr(path, '/');
+		char line[LETS_NAME_MAX + 16];
 
-		vfs_info_t t;
-
-		e.block = (p.kind == VFS_NODE && vfs_blk_get(path) != NULL);
-
-		if (vfs_file_info(&p, &t) == 0) {
-			e.size = t.size;
-		}
-
-		if (p.kind == VFS_NODE) {
-			int size = tmp_file_size(&vfs_nodes_get()[p.node]);
-
-			if (size > 0) {
-				e.size = (uint32_t)size;
-			}
-		}
-
-		char line[TFS_NAME_SIZE + 16];
-
-		bin_ls_long(&e, line, sizeof(line));
+		bin_ls_long((name != NULL) ? name + 1 : path, &st, line, sizeof(line));
 		printf("%s", line);
 		return 1;
 	}
 
-	bin_ls_t *s = lines_alloc(sizeof(bin_ls_t), bin_ls_next);
+	size_t length = strlen(path) + 1u;
+	bin_ls_t *s = lines_alloc((unsigned int)(sizeof(bin_ls_t) + length), bin_ls_next);
 
 	if (s == NULL) {
 		return -1;
 	}
 
-	s->dir = p.dir;
+	memcpy(s->path, path, length);
 	s->all = all;
 	s->list = list;
 	s->slash = slash;
+	s->bin = bin_is_bin(path);
 
 	/* what it returns: how many entries it shows */
-	uint16_t index = 0;
+	int count = 0;
+	DIR *d = opendir(path);
+	struct dirent *e;
 
-	while (vfs_dir_read(p.dir, &index, &e) == 0) {
-		count += !(e.hidden && !all && p.dir != VFS_BIN);
+	while (d != NULL && (e = readdir(d)) != NULL) {
+		count += bin_shown(e, all, s->bin);
 	}
+
+	closedir(d);
 
 	return (lines_run("ls", &s->lines) < 0) ? -1 : count;
 }
@@ -272,16 +303,16 @@ static int bin_rm(void *args, int argc, char *argv[])
 		return bin_bad();
 	}
 
-	vfs_path_t p;
+	struct stat st;
 
-	if (vfs_resolve(argv[1], &p) < 0 || p.kind == VFS_NONE) {
+	if (stat(argv[1], &st) < 0) {
 		printf("not found\n");
 		return -1;
 	}
 
 	/* devices, commands and mount points stay; a directory must be empty */
 	if (remove(argv[1]) < 0) {
-		printf(p.kind == VFS_DIR ? "not empty\n" : "busy or not a file\n");
+		printf(S_ISDIR(st.st_mode) ? "not empty\n" : "busy or not a file\n");
 		return -1;
 	}
 
@@ -317,7 +348,9 @@ static int bin_touch(void *args, int argc, char *argv[])
 /* a file or a RAM file, read to its end; a sensor has no end, it gets one read */
 static bool bin_has_end(int fd)
 {
-	return vfs_file_is(fd) || tmp_file_size(vfs_fd_node(fd)) >= 0;
+	struct stat st;
+
+	return fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
 }
 
 /*
@@ -431,7 +464,7 @@ static int bin_cat(void *args, int argc, char *argv[])
 	}
 
 	/* a file (not a device, not stdin) as pieces that are never lost */
-	if (!in && !hex && bin_has_end(vfs_stream(fd))) {
+	if (!in && !hex && bin_has_end(fd)) {
 		close(fd);
 		return bin_cat_file(argv[argc - 1]);
 	}
@@ -447,7 +480,7 @@ static int bin_cat(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-	bool file = bin_has_end(vfs_stream(fd));
+	bool file = bin_has_end(fd);
 	int total = 0;
 	char last = '\n';
 	int n;
@@ -505,16 +538,18 @@ static int bin_cp(void *args, int argc, char *argv[])
 	}
 
 	char *to = buffer + BIN_BUFFER_SIZE;
-	vfs_path_t from, dest;
+	const char *name = strrchr(argv[1], '/');
+	struct stat from, dest;
 
 	strncpy(to, argv[2], VFS_PATH_MAX - 1);
 	to[VFS_PATH_MAX - 1] = '\0';
+	name = (name != NULL) ? name + 1 : argv[1];
 
 	/* into a directory: under the same name */
-	if (vfs_resolve(argv[1], &from) == 0 && vfs_resolve(argv[2], &dest) == 0 &&
-	    dest.kind == VFS_DIR && strlen(to) + strlen(from.name) + 2u < VFS_PATH_MAX) {
+	if (stat(argv[1], &from) == 0 && stat(argv[2], &dest) == 0 && S_ISDIR(dest.st_mode) &&
+	    strlen(to) + strlen(name) + 2u < VFS_PATH_MAX) {
 		strcat(to, "/");
-		strcat(to, from.name);
+		strcat(to, name);
 	}
 
 	int in = open(argv[1], 0, 0);
@@ -542,7 +577,7 @@ static int bin_cp(void *args, int argc, char *argv[])
 
 	/* a copy that failed must not replace what was there */
 	if (out >= 0 && total < 0) {
-		vfs_file_abort(out);
+		ioctl(out, LETS_IOC_ABORT);
 	} else if (out >= 0) {
 		close(out);
 	}
@@ -646,23 +681,22 @@ static int bin_umount(void *args, int argc, char *argv[])
 /* ------------------------------------------------------------------------ */
 /* Tab completion that follows the tree                                     */
 
-/* offers every entry of directory @p dir; returns how many matched */
-static int bin_names_in(uint8_t dir, bool (*candidate)(const char *, bool))
+/* offers every entry of directory @p path; returns how many matched */
+static int bin_names_in(const char *path, bool (*candidate)(const char *, bool))
 {
-	vfs_dirent_t e;
-	uint16_t index = 0;
+	DIR *d = opendir(path);
+	bool bin = bin_is_bin(path);
+	struct dirent *e;
 	int matched = 0;
 
-	while (vfs_dir_read(dir, &index, &e) == 0) {
+	while (d != NULL && (e = readdir(d)) != NULL) {
 		/* as ls shows them: hidden nodes only in /bin, where the commands are */
-		if (e.hidden && dir != VFS_BIN) {
-			continue;
-		}
-
-		if (candidate(e.name, e.kind == VFS_DIR)) {
+		if (bin_shown(e, false, bin) && candidate(e->d_name, e->d_type == DT_DIR)) {
 			matched++;
 		}
 	}
+
+	closedir(d);
 
 	return matched;
 }
@@ -678,7 +712,7 @@ static void bin_names(const char *word, bool command, bool (*candidate)(const ch
 	const char *slash = strrchr(word, '/');
 
 	if (slash == NULL) {
-		if (command || bin_names_in(vfs_cwd(), candidate) == 0) {
+		if (command || bin_names_in(".", candidate) == 0) {
 			shell_node_names(word, command, candidate);
 		}
 		return;
@@ -696,11 +730,7 @@ static void bin_names(const char *word, bool command, bool (*candidate)(const ch
 		return;
 	}
 
-	vfs_path_t p;
-
-	if (vfs_resolve(dir, &p) == 0 && p.kind == VFS_DIR) {
-		bin_names_in(p.dir, candidate);
-	}
+	bin_names_in(dir, candidate);
 }
 
 /* the prompt: the working directory, ~ for the home, as a Linux shell ("~$ ", "/tmp$ ") */

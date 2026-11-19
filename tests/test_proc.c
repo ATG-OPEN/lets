@@ -181,6 +181,40 @@ static int checks(void *arg, uint64_t now)
 		CHECK(getcwd(buf, 4) == NULL && chdir("/nowhere") == -1 && chdir("/") == 0);
 		CHECK(mkdir("/tmp/d", 0) == 0 && rename("/tmp/d", "/tmp/e") == 0 && remove("/tmp/e") == 0);
 		CHECK(isatty(0) == 0 && isatty(1) == 0 && isatty(7) == 0);
+
+		/* stat, fstat, opendir / readdir / telldir / seekdir, ioctl */
+		struct stat st, st2;
+		CHECK(stat("/", &st) == 0 && S_ISDIR(st.st_mode) && (st.st_mode & S_IXUSR));
+		CHECK(stat("/bin/ls", &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0700) == S_IXUSR);
+		CHECK(stat("/dev/sink", &st) == 0 && S_ISCHR(st.st_mode) && (st.st_mode & 0700) == S_IWUSR);
+		CHECK(stat("sink", &st2) == 0 && st2.st_ino == st.st_ino && st.st_dev == 0);
+		CHECK(stat("/nothing", &st) == -1 && stat("/bin/nothing", &st) == -1);
+		int f = open("/tmp/r", O_WRONLY | O_CREAT, 0);
+		CHECK(f >= 0 && write(f, "abc", 3) == 3 && fstat(f, &st) == 0 && S_ISREG(st.st_mode));
+		CHECK(close(f) == 0 && stat("/tmp/r", &st) == 0 && S_ISREG(st.st_mode) && st.st_size == 3);
+		CHECK(fstat(1, &st) == 0 && S_ISCHR(st.st_mode) && fstat(99, &st) == -1);
+		CHECK(ioctl(99, LETS_IOC_ABORT) == -1 && remove("/tmp/r") == 0);
+		DIR *d = opendir("/");
+		struct dirent *e;
+		int entries = 0, dirs = 0;
+		long second = 0;
+		while (d != NULL && (e = readdir(d)) != NULL) {
+			entries++;
+			dirs += (e->d_type == DT_DIR);
+			if (entries == 1) {
+				second = telldir(d);
+			}
+		}
+		CHECK(d != NULL && entries == dirs && entries >= 5);
+		seekdir(d, second);
+		CHECK((e = readdir(d)) != NULL && strcmp(e->d_name, "dev") == 0 && closedir(d) == 0);
+		CHECK(opendir("/bin/ls") == NULL && opendir("/nothing") == NULL);
+		d = opendir("/bin");
+		bool hidden = false;
+		while (d != NULL && (e = readdir(d)) != NULL) {
+			hidden |= (strcmp(e->d_name, "ls") == 0 && e->d_hidden && e->d_type == DT_REG);
+		}
+		CHECK(hidden && closedir(d) == 0);
 		CHECK(system("std -t sink") == 0 && isatty(1) == 1 && isatty(3) == 0);
 
 		/* top: in a task, line by line */

@@ -199,7 +199,10 @@ int vfs_ed(void *args, int argc, char *argv[])
 	 * A file of a file system: its O_TRUNC copy below is new, so the old one can still be read.
 	 * A RAM file would be emptied by that open, and a device has no lines to keep.
 	 */
-	if (end < 0 || (in >= 0 && (!vfs_file_is(in) || lseek(in, 0, SEEK_SET) != 0))) {
+	struct stat st;
+
+	/* st_dev: a file of a mounted file system, not a RAM file or a device */
+	if (end < 0 || (in >= 0 && (fstat(in, &st) < 0 || st.st_dev == 0 || lseek(in, 0, SEEK_SET) != 0))) {
 		close(in);
 		printf("not a file\n");
 		return -1;
@@ -259,7 +262,7 @@ int vfs_ed(void *args, int argc, char *argv[])
 
 	/* an edit that failed must not replace what was there */
 	if (r < 0 || !ok) {
-		vfs_file_abort(out);
+		ioctl(out, LETS_IOC_ABORT);
 	} else if (close(out) == 0) {
 		return 0;
 	}

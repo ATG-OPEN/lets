@@ -166,6 +166,11 @@ void sync(void)
 	vfs_sync();
 }
 
+int ioctl(int fd, unsigned long request, ...)
+{
+	return (request == LETS_IOC_ABORT) ? vfs_file_abort(vfs_stream(fd)) : -1;
+}
+
 char *getcwd(char *buffer, size_t size)
 {
 	return (vfs_dir_path(vfs_cwd(), buffer, (unsigned int)size) < 0) ? NULL : buffer;

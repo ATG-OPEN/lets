@@ -481,6 +481,142 @@ int vfs_dir_read(uint8_t dir, uint16_t *index, vfs_dirent_t *e)
 }
 
 /* -------------------------------------------------------------------------- */
+/* stat() and the directories of a program: opendir(), readdir(), closedir() */
+
+/* as Linux shows it: a directory rwx, a file rw-, a built-in command --x, a node what it can do */
+static mode_t vfs_mode(const vfs_dirent_t *e)
+{
+	if (e->kind == VFS_DIR) {
+		return S_IFDIR | S_IRUSR | S_IWUSR | S_IXUSR;
+	}
+
+	if (e->kind != VFS_NODE) {
+		return S_IFREG | S_IRUSR | S_IWUSR;
+	}
+
+	if (e->node < 0) {
+		return S_IFREG | S_IXUSR;
+	}
+
+	vfs_node_t *n = vfs_at(e->node);
+	const vfs_handler_t *h = n->handlers;
+	mode_t m = (h->read_handler ? S_IRUSR : 0u) | (h->write_handler ? S_IWUSR : 0u) |
+		   (h->execute_handler ? S_IXUSR : 0u);
+
+	if (e->block) {
+		return m | S_IFBLK;
+	}
+
+	return m | (((h->read_handler || h->write_handler) && tmp_file_size(n) < 0) ? S_IFCHR : S_IFREG);
+}
+
+int stat(const char *path, struct stat *st)
+{
+	vfs_path_t p;
+	vfs_dirent_t e;
+	vfs_info_t info;
+
+	if (path == NULL || st == NULL || vfs_resolve(path, &p) < 0) {
+		return -1;
+	}
+
+	memset(&e, 0, sizeof(e));
+	e.kind = p.kind;
+	e.node = p.node;
+
+	/* a built-in command: in /bin, though no node */
+	if (p.kind == VFS_NONE && p.dir == VFS_BIN) {
+		for (unsigned int i = 0; i < vfs_commands_count; i++) {
+			if (strcmp(p.name, vfs_commands[i].name) == 0) {
+				e.kind = VFS_NODE;
+				e.node = -1;
+			}
+		}
+	}
+
+	if (e.kind == VFS_NONE) {
+		return -1;
+	}
+
+	st->st_size = 0;
+	st->st_ino = (ino_t)((p.kind == VFS_DIR) ? p.dir : (p.kind == VFS_NODE) ? 0x100 + p.node : 0);
+	st->st_dev = (dev_t)((p.kind == VFS_FILE) ? p.dir : 0);
+
+	if (p.kind == VFS_NODE) {
+		int size = tmp_file_size(vfs_at(p.node));
+
+		e.block = (vfs_at(p.node)->handlers == &vfs_blk_handlers);
+		st->st_size = (size > 0) ? size : 0;
+	} else if (vfs_file_info(&p, &info) == 0) {
+		st->st_size = (off_t)info.size;
+	}
+
+	st->st_mode = vfs_mode(&e);
+
+	return 0;
+}
+
+/* a directory a program reads */
+struct lets_dir {
+	uint8_t dir;
+	uint16_t index;
+	struct dirent entry;
+};
+
+DIR *opendir(const char *path)
+{
+	vfs_path_t p;
+
+	if (path == NULL || vfs_resolve(path, &p) < 0 || p.kind != VFS_DIR) {
+		return NULL;
+	}
+
+	DIR *d = malloc(sizeof(DIR));
+
+	if (d != NULL) {
+		d->dir = p.dir;
+		d->index = 0;
+	}
+
+	return d;
+}
+
+struct dirent *readdir(DIR *d)
+{
+	vfs_dirent_t e;
+
+	if (d == NULL || vfs_dir_read(d->dir, &d->index, &e) < 0) {
+		return NULL;
+	}
+
+	mode_t m = vfs_mode(&e);
+
+	strncpy(d->entry.d_name, e.name, sizeof(d->entry.d_name) - 1u);
+	d->entry.d_name[sizeof(d->entry.d_name) - 1u] = '\0';
+	d->entry.d_type = S_ISDIR(m) ? DT_DIR : S_ISCHR(m) ? DT_CHR : S_ISBLK(m) ? DT_BLK : DT_REG;
+	d->entry.d_hidden = e.hidden;
+
+	return &d->entry;
+}
+
+int closedir(DIR *d)
+{
+	free(d);
+
+	return 0;
+}
+
+long telldir(DIR *d)
+{
+	return d->index;
+}
+
+void seekdir(DIR *d, long at)
+{
+	d->index = (uint16_t)at;
+}
+
+/* -------------------------------------------------------------------------- */
 /* nodes, commands, directories */
 
 int vfs_node_create(const char *path, bool hidden, void *args, const vfs_handler_t *handlers)
@@ -869,6 +1005,27 @@ bool vfs_device_open(const void *args)
 	}
 
 	return false;
+}
+
+int fstat(int fd, struct stat *st)
+{
+	vfs_fd_t *f = vfs_fd(vfs_stream(fd));
+	vfs_dirent_t e;
+
+	if (f == NULL || st == NULL) {
+		return -1;
+	}
+
+	memset(&e, 0, sizeof(e));
+	e.kind = (f->type != NULL) ? VFS_FILE : VFS_NODE;
+	e.node = (f->type != NULL) ? -1 : (int16_t)((vfs_node_t *)f->object - vfs_at(0));
+	e.block = (f->type == NULL && ((vfs_node_t *)f->object)->handlers == &vfs_blk_handlers);
+	st->st_mode = vfs_mode(&e);
+	st->st_size = 0;
+	st->st_ino = (ino_t)((e.node >= 0) ? 0x100 + e.node : 0);
+	st->st_dev = (dev_t)((f->type != NULL) ? 1 : 0); /* which one is not known here */
+
+	return 0;
 }
 
 bool vfs_file_is(int handle)
