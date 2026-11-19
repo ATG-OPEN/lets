@@ -25,6 +25,9 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
+#include <signal.h>
 
 #define open   k_open
 #define read   k_read
@@ -73,6 +76,9 @@
 #define calloc	k_calloc_is_not_in_the_kernel
 #define realloc k_realloc_is_not_in_the_kernel
 
+/* lets/include's headers add LETS's declarations (lib/posix.h) only from here on: under the k_ names */
+#define LETS_PRELUDE_RENAMED 1
+
 int k_open(const char *pathname, int flags, int mode);
 int k_close(int handle);
 int k_write(int handle, void *buffer, unsigned int len);
@@ -82,5 +88,8 @@ int k_system(const char *input);
 int k_printf(const char *format, ...);
 void *k_malloc(size_t size);
 void k_free(void *ptr);
+
+/* what LETS adds to the C library (chdir, poll, clock_gettime, ...), under the k_ names */
+#include "../../lib/posix.h"
 
 #endif

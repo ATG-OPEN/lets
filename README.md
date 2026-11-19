@@ -77,6 +77,10 @@ same with file systems: try `ls /`, `ls -l /dev`, `cd /mnt/ee`, `echo hi > f`, `
 
 ## On the MCU
 
+Programs include only standard headers and `<lets-app.h>`: on XC16 run `tools/xc16-install.sh` once
+(it adds `<fcntl.h>`, `<poll.h>`, `<sys/stat.h>`, ... to the compiler; [docs/xc16-setup.md](docs/xc16-setup.md)),
+on Cortex-M add `-I lets/include`. Add `lib/app.c` (`lets_spawn()`) to the project.
+
 Add `kernel/`, `bin/`, `vfs/node.c`, `vfs/vfs.c`, `vfs/posix.c`, `vfs/tmp.c`, `vfs/proc.c`, `vfs/sys.c` (the node `sys`, if used),
 `lib/args.c` and `port/pic24/wdt.c` (the watchdog, reset-cause and stack hooks; needed with or without
 `LETS_WDT`) to your MPLAB X project (XC16), plus any `opt/` node your board uses (the PIC24 UART

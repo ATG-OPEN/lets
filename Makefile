@@ -108,3 +108,17 @@ clean:
 	$(MAKE) -C lib/test clean
 
 .PHONY: all libs test format docs clean
+
+# a program with standard headers only (tests/app/posix-app.c): XC16 patched by tools/xc16-install.sh,
+# Cortex-M (newlib) with lets/include and the port's prelude
+XC16_GCC ?= $(lastword $(sort $(wildcard /Applications/microchip/xc16/v*/bin/xc16-gcc /opt/microchip/xc16/v*/bin/xc16-gcc)))
+app-check:
+	@if [ -n "$(XC16_GCC)" ] && tools/xc16-install.sh --check >/dev/null; then \
+		$(XC16_GCC) -mcpu=24FJ1024GA606 -omf=elf -O1 -Wall -Werror -c tests/app/posix-app.c -o build/posix-app-xc16.o && echo "app-check: XC16 ok"; \
+	else echo "app-check: XC16 not found or not patched (tools/xc16-install.sh): skipped"; fi
+	@if command -v arm-none-eabi-gcc >/dev/null; then \
+		arm-none-eabi-gcc -mcpu=cortex-m33 -mthumb -Os -Wall -Werror -include port/cortex-m/prelude.h -Iinclude \
+			-c tests/app/posix-app.c -o build/posix-app-arm.o && echo "app-check: Cortex-M ok"; \
+	else echo "app-check: arm-none-eabi-gcc not found: skipped"; fi
+.PHONY: app-check
+
