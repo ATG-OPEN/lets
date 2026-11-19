@@ -47,6 +47,10 @@
 #define O_ACCMODE 03
 #endif
 
+#ifndef VFS_PROC
+#define VFS_PROC 1 /**< 1: the kernel's /proc is mounted (vfs/proc.c); 0 leaves it out. */
+#endif
+
 /** mount() flag of LETS: format a device that holds no file system (tfs; `mount -f`). */
 #define MS_FORMAT 0x40000000ul
 
@@ -69,6 +73,18 @@ int mount(const char *source, const char *target, const char *type, unsigned lon
 
 /** @brief Unmounts the file system at @p target (no file may be open on it). @return 0 or -1. */
 int umount(const char *target);
+
+/**
+ * @brief Stops the task with ID @p pid (its slot: `top`'s ID, /proc/<ID>); @p sig 0 asks
+ * whether it is there, any other stops it (kernel/task.c). pid 0 is a task, not a group.
+ * @return 0 or -1.
+ */
+int kill(pid_t pid, int sig);
+
+#ifndef SIGTERM
+#define SIGKILL 9
+#define SIGTERM 15
+#endif
 
 /** @brief Passes on what stdout holds and makes every block device write back what it holds. */
 void sync(void);

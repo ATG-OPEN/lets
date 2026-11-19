@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <unistd.h> /* pid_t: kill() */
 
 #ifndef TASKS_MAX_COUNT
 #define TASKS_MAX_COUNT 16u /**< Size of the task table: a project can set its own. */
@@ -152,6 +153,15 @@ int task_stop_byname(char *name);
  * @return 0, or -1 when there is no such task.
  */
 int task_stop_arg(const char *name, const void *arg);
+
+/**
+ * @brief kill(2): stops the task whose ID (its slot, as `top` and /proc show it) is @p pid,
+ * as task_stop_byname(); @p sig 0 only asks whether it is there. Any other signal stops it
+ * (SIGTERM, SIGKILL: a cooperative task has nothing to catch it with). Note that pid 0 is a
+ * task here, not a process group.
+ * @return 0, or -1 when there is no such task.
+ */
+int kill(pid_t pid, int sig);
 
 /** @brief true when the running task has stopped itself and must return. */
 bool task_stopping(void);

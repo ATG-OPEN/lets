@@ -201,6 +201,12 @@ unbuffered: a write to 2 says how much a full stream took (0: nothing now, try l
 how `lines.h` and `top` never lose a line on a packet port; `fsync(1)` passes on stdout's line
 first. `isatty(0)` is the terminal mode (`std -t`, `shell -t`): a line ends in "\r\n" there.
 
+What only the kernel knows is in `/proc` (`vfs/proc.c`, a file system type mounted at boot):
+`/proc/stat` and `/proc/meminfo` are the first two lines of `top`, `/proc/mem` is `top mem`, and
+`/proc/<ID>` is the row of the task in slot ID. `top` reads them, `kill NAME` finds the ID in the
+rows and calls `kill(ID, SIGTERM)`. A board short of flash builds with `-DVFS_PROC=0`: no mount
+(and one directory slot less), `top` takes the same lines from `vfs_proc_line()` directly.
+
 The commands of `bin/` are programs in this sense; the command table `vfs_commands` is theirs
 (`bin/bin.c`), and `system()` underneath finds a name in it. The old `vfs_*` names of these calls
 (`vfs_chdir`, `vfs_mkdir`, ...) remain as macros for code written before.

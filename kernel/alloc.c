@@ -179,7 +179,7 @@ int alloc_change_owner(void *ptr, int newowner)
 
 /* -------------------------------------------------------------------------- */
 
-void alloc_info(void)
+void alloc_stats(size_t *in_use, unsigned int *blocks_used, size_t *largest_free)
 {
 	size_t used = 0;
 	unsigned count = 0;
@@ -224,6 +224,17 @@ void alloc_info(void)
 		offset = blocks[next].offset + blocks[next].size;
 	}
 
+	*in_use = used;
+	*blocks_used = count;
+	*largest_free = largest;
+}
+
+void alloc_info(void)
+{
+	size_t used, largest;
+	unsigned int count;
+
+	alloc_stats(&used, &count, &largest);
 	printf("heap %u B used %u B free %u B\n", (unsigned)alloc_heap_length, (unsigned)used,
 	       (unsigned)(alloc_heap_length - used));
 	printf("blocks %u/%u largest free %u B\n", count, (unsigned)MAX_BLOCK_COUNT,

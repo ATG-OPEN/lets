@@ -571,7 +571,9 @@ static int bin_df(void *args, int argc, char *argv[])
 		void *fs = vfs_mount_get((uint8_t)i, &type);
 		uint32_t size, avail;
 
-		if (fs == NULL || vfs_dir_path((uint8_t)i, path, sizeof(path)) < 0) {
+		/* /proc holds no files of its own, as on Linux */
+		if (fs == NULL || vfs_dir_path((uint8_t)i, path, sizeof(path)) < 0 ||
+		    (VFS_PROC && strcmp(type->name, "proc") == 0)) {
 			continue;
 		}
 
@@ -725,7 +727,7 @@ const vfs_command_t vfs_commands[] = {
 	{"cat", bin_cat},	{"cd", bin_cd},
 	{"cp", bin_cp},		{"date", date_execute},
 	{"df", bin_df},		{"echo", bin_echo},
-	{"kill", kill},		{"ls", bin_ls},
+	{"kill", kill_execute},		{"ls", bin_ls},
 	{"mkdir", bin_mkdir},	{"mount", bin_mount},
 	{"mv", bin_mv},
 #ifndef SHELL_NO_PASSWORD

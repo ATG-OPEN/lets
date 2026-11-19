@@ -75,4 +75,10 @@ void *lines_alloc(unsigned int size, lines_next_t next);
  */
 int lines_run(const char *name, lines_t *l);
 
+/**
+ * @brief As lines_run(), but all of it in the task named @p name, also when the stream would
+ * take it at once (`top`, which shows itself among the tasks). @return 0, or -1 when no task was free.
+ */
+int lines_spawn(const char *name, lines_t *l);
+
 #endif /* LINES_H */

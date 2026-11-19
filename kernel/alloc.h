@@ -82,6 +82,9 @@ int alloc_free_owner(int owner);
  */
 int alloc_change_owner(void *ptr, int newowner);
 
+/** @brief The bytes in use, the blocks in use and the largest free gap (/proc/mem). */
+void alloc_stats(size_t *in_use, unsigned int *blocks_used, size_t *largest_free);
+
 /** @brief Prints a summary: used, free, block count, largest free gap. */
 void alloc_info(void);
 

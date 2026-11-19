@@ -2,337 +2,80 @@
 /* Copyright (c) 2026 ATG */
 
 /*
- * See top.h. The lines are written by a task of their own, one at a time and
- * straight to the console handle: a packet port takes only so many packets (one
- * per line) before its queue is full and a write returns 0. Then the line is
- * kept and written again on the next call, so no line is lost however many
- * tasks there are. The shell waits for the task (shell_wait()), so the prompt
- * comes after the last line.
+ * See top.h. The lines are the kernel's (/proc: stat, meminfo, then one file per task), read
+ * one at a time and written as lines.h does: a packet port takes only so many packets (one per
+ * line) before its queue is full and a write returns 0; then the line is written again a little
+ * later, so no line is lost however many tasks there are. It all happens in a task of its own,
+ * which shows among the others; the shell waits for it, so the prompt comes after the last line.
  */
 
 #include "top.h"
-#include "date.h"
-#include "shell.h"
+#include "lines.h"
 
-#include "../kernel/task.h"
-#include "../kernel/alloc.h"
-#include "../vfs/vfs.h"
+#include "../lib/posix.h"
 
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 
-#define TOP_LINE_SIZE 96u /* a line and its end, well inside a small packet */
+#define TOP_HEADER " ID NAME            STATE   RAM    LAST     MAX  PERIOD   CPU\n"
+#define TOP_IDS	   100u /* /proc/0 .. /proc/99: the task slots there can be */
 
-enum { TOP_UPTIME, TOP_MEMORY, TOP_HEADER, TOP_TASKS };
+#if !VFS_PROC
+/* a board without the /proc mount (VFS_PROC 0, vfs.h) asks the kernel for the same text */
+int vfs_proc_line(unsigned int line, char *buf, unsigned int max);
+void vfs_proc_mem(void);
+#endif
 
 typedef struct {
-	uint8_t step;	/* TOP_*: the line being made */
-	uint8_t slot;	/* TOP_TASKS: the next task table slot to look at */
-	uint8_t length; /* of line, 0: make the next one */
-	char line[TOP_LINE_SIZE];
+	lines_t lines;
+	uint8_t step; /* 0 stat, 1 meminfo, 2 the header, 3 + k task slot k */
 } top_t;
 
-/*
- * The text is put together by hand, not with printf(): on a PIC24 a line by
- * snprintf() took 11 ms, long enough for a UART to fill its receive queue
- * while every other task waited.
- */
-typedef struct {
-	char *buf;
-	uint8_t n;
-	uint8_t max;
-} top_text_t;
-
-static void top_put(top_text_t *t, const char *text)
+/* line @p i of `top` but the header (0 stat, 1 meminfo, 2 + k slot k): its length, 0 or -1 */
+static int top_line(unsigned int i, char *piece, unsigned int max)
 {
-	while (*text != '\0' && t->n < t->max) {
-		t->buf[t->n++] = *text++;
-	}
-}
+#if VFS_PROC
+	char path[16];
 
-/* @p v in decimal, at least @p width digits wide, padded with @p fill */
-static void top_uint(top_text_t *t, uint32_t v, uint8_t width, char fill)
-{
-	char d[10];
-	uint8_t k = 0;
-
-	do {
-		d[k++] = (char)('0' + v % 10u);
-		v /= 10u;
-	} while (v > 0);
-
-	while (width > k && t->n < t->max) {
-		t->buf[t->n++] = fill;
-		width--;
-	}
-
-	while (k > 0 && t->n < t->max) {
-		t->buf[t->n++] = d[--k];
-	}
-}
-
-/* a time in us as "850us", "1.25ms", "125ms" or "12.5s" */
-static void top_time(top_text_t *t, uint32_t us)
-{
-	if (us < 1000u) {
-		top_uint(t, us, 0, ' ');
-		top_put(t, "us");
-	} else if (us < 10000u) {
-		top_uint(t, us / 1000u, 0, ' ');
-		top_put(t, ".");
-		top_uint(t, us / 10u % 100u, 2, '0');
-		top_put(t, "ms");
-	} else if (us < 1000000u) {
-		top_uint(t, us / 1000u, 0, ' ');
-		top_put(t, "ms");
+	if (i < 2u) {
+		strcpy(path, (i == 0u) ? "/proc/stat" : "/proc/meminfo");
 	} else {
-		top_uint(t, us / 1000000u, 0, ' ');
-		top_put(t, ".");
-		top_uint(t, us / 100000u % 10u, 0, ' ');
-		top_put(t, "s");
-	}
-}
-
-/* part of whole in %, as "40%" */
-static void top_percent(top_text_t *t, uint32_t part, uint32_t whole)
-{
-	top_uint(t, whole ? part * 100u / whole : 0u, 0, ' ');
-	top_put(t, "%");
-}
-
-/* @p text in a column of @p width, to the right or the left; a space after it */
-static void top_column(top_text_t *line, const char *text, uint8_t length, uint8_t width, bool right)
-{
-	uint8_t pad = (length < width) ? (uint8_t)(width - length) : 0u;
-
-	for (; right && pad > 0 && line->n < line->max; pad--) {
-		line->buf[line->n++] = ' ';
+		snprintf(path, sizeof(path), "/proc/%u", i - 2u);
 	}
 
-	for (uint8_t i = 0; i < length && i < width && line->n < line->max; i++) {
-		line->buf[line->n++] = text[i];
-	}
+	int fd = open(path, O_RDONLY, 0);
+	int n = (fd < 0) ? 0 : read(fd, piece, max);
 
-	for (; pad > 0 && line->n < line->max; pad--) {
-		line->buf[line->n++] = ' ';
-	}
+	close(fd);
 
-	top_put(line, " ");
-}
-
-/* why the chip last reset, and the fault the kernel kept, e.g. "watchdog (late: link)" */
-static void top_reset(top_text_t *l)
-{
-	static const char *const names[] = {"-",	"power-on", "brown-out", "MCLR pin",
-					    "software", "watchdog", "trap"};
-	unsigned int r = (unsigned int)task_reset_reason();
-
-	top_put(l, names[(r < sizeof(names) / sizeof(names[0])) ? r : 0u]);
-
-#if LETS_WDT
-	const task_fault_t *f = task_fault();
-
-	if (f == NULL) {
-		return;
-	}
-
-	if (f->kind == TASK_FAULT_TRAP) {
-		top_put(l, " ");
-		top_uint(l, f->code, 0, ' ');
-	}
-
-	top_put(l, (f->kind == TASK_FAULT_LATE)	  ? " (late: "
-		   : (f->kind == TASK_FAULT_HANG) ? " (hang: "
-						  : " (in: ");
-	top_put(l, (f->task[0] != '\0') ? f->task : "-");
-
-	if (f->by[0] != '\0') {
-		top_put(l, ", by: ");
-		top_put(l, f->by);
-	}
-
-	top_put(l, ")");
+	return (i - 2u >= TOP_IDS && i >= 2u) ? -1 : n;
+#else
+	return vfs_proc_line(i, piece, max + 1u);
 #endif
 }
 
-static const char *top_state(uint8_t state)
+static unsigned int top_next(lines_t *l, char *piece, unsigned int max)
 {
-	return (state == TASK_RUNNING) ? "run" : (state == TASK_SLEEPING) ? "sleep" : "stop";
-}
+	top_t *s = (top_t *)l;
 
-/* one task's row */
-static void top_row(top_text_t *line, uint8_t slot, const task_t *task)
-{
-	char c[12];
-	top_text_t cell = {c, 0, sizeof(c)};
-
-	top_uint(&cell, slot, 0, ' ');
-	top_column(line, c, cell.n, 3, true);
-	top_column(line, task->info.name, (uint8_t)strlen(task->info.name), 15, false);
-
-	const char *state = top_state(task->state);
-	top_column(line, state, (uint8_t)strlen(state), 5, false);
-
-	cell.n = 0;
-	top_uint(&cell, (uint32_t)alloc_get_owner_size(slot), 0, ' ');
-	top_put(&cell, "B");
-	top_column(line, c, cell.n, 5, true);
-
-	const uint32_t times[3] = {task->info.duration, task->info.worst, task->info.delay};
-
-	for (int i = 0; i < 3; i++) {
-		cell.n = 0;
-		top_time(&cell, times[i]);
-		top_column(line, c, cell.n, 7, true);
-	}
-
-	/* its share of the time: its last call over the time between its last two calls, in 0.1% */
-	uint32_t d = task->info.duration, p = task->info.delay;
-	cell.n = 0;
-
-	if (p > 0) {
-		uint32_t pm = (p >= 1000u) ? d / (p / 1000u) : d * 1000u / p;
-
-		pm = (pm > 1000u) ? 1000u : pm;
-		top_uint(&cell, pm / 10u, 0, ' ');
-		top_put(&cell, ".");
-		top_uint(&cell, pm % 10u, 0, ' ');
-		top_put(&cell, "%");
-	} else {
-		top_put(&cell, "-");
-	}
-
-	top_column(line, c, cell.n, 5, true);
-}
-
-/* makes the next line in s->line; false when there is none */
-static bool top_make(top_t *s)
-{
-	top_text_t l = {s->line, 0, TOP_LINE_SIZE - 3u}; /* room for the end */
-
-	switch (s->step) {
-	case TOP_UPTIME: {
-		uint32_t up = date_uptime();
-		uint32_t loop = (uint32_t)(task_get_loop_time() * 1000.0f);
-
-		top_put(&l, "up ");
-		top_uint(&l, up / 86400u, 0, ' ');
-		top_put(&l, "d ");
-		top_uint(&l, up / 3600u % 24u, 2, '0');
-		top_put(&l, ":");
-		top_uint(&l, up / 60u % 60u, 2, '0');
-		top_put(&l, ":");
-		top_uint(&l, up % 60u, 2, '0');
-		top_put(&l, "  tasks ");
-		top_uint(&l, (uint32_t)task_count(), 0, ' ');
-		top_put(&l, "  loop ");
-		top_time(&l, loop);
-
-		if (loop > 0) {
-			top_put(&l, " (");
-			top_uint(&l, 1000000u / loop, 0, ' ');
-			top_put(&l, "/s)");
+	for (int n = 0; n >= 0; s->step++) {
+		if (s->step == 2u) {
+			s->step++;
+			strcpy(piece, TOP_HEADER);
+			return sizeof(TOP_HEADER) - 1u;
 		}
 
-		top_put(&l, "  reset ");
-		top_reset(&l);
-		s->step = TOP_MEMORY;
-		break;
-	}
+		n = top_line(s->step - ((s->step > 2u) ? 1u : 0u), piece, max);
 
-	case TOP_MEMORY: {
-		uint32_t heap = (uint32_t)alloc_heap_size();
-		uint32_t used = heap - (uint32_t)alloc_free_size();
-		size_t peak, size;
-
-		top_put(&l, "heap ");
-		top_uint(&l, used, 0, ' ');
-		top_put(&l, " of ");
-		top_uint(&l, heap, 0, ' ');
-		top_put(&l, " B used (");
-		top_percent(&l, used, heap);
-		top_put(&l, ")");
-
-		if (task_stack(&peak, &size) == 0) {
-			top_put(&l, "  stack ");
-			top_uint(&l, (uint32_t)peak, 0, ' ');
-			top_put(&l, " of ");
-			top_uint(&l, (uint32_t)size, 0, ' ');
-			top_put(&l, " B (");
-			top_percent(&l, (uint32_t)peak, (uint32_t)size);
-			top_put(&l, ")");
+		if (n > 0) {
+			s->step++;
+			piece[n - 1] = '\n'; /* a line cut short ends too */
+			return (unsigned int)n;
 		}
-
-		s->step = TOP_HEADER;
-		break;
 	}
 
-	case TOP_HEADER:
-		top_put(&l, " ID NAME            STATE   RAM    LAST     MAX  PERIOD   CPU");
-		s->step = TOP_TASKS;
-		break;
-
-	default: {
-		task_t *t = task_get_data();
-
-		while (s->slot < TASKS_MAX_COUNT && t[s->slot].state == TASK_UNUSED) {
-			s->slot++;
-		}
-
-		if (s->slot >= TASKS_MAX_COUNT) {
-			return false;
-		}
-
-		top_row(&l, s->slot, &t[s->slot]);
-
-		/* no trailing space */
-		while (l.n > 0 && l.buf[l.n - 1] == ' ') {
-			l.n--;
-		}
-
-		s->slot++;
-		break;
-	}
-	}
-
-	/* the line end: a terminal needs "\r\n" */
-	if (isatty(1)) {
-		s->line[l.n++] = '\r';
-	}
-
-	s->line[l.n++] = '\n';
-	s->length = l.n;
-
-	return true;
-}
-
-static int top_task(void *args, uint64_t system_time)
-{
-	top_t *s = args;
-
-	(void)system_time;
-
-	/* one line a call: the other tasks run in between */
-	if (s->length == 0 && !top_make(s)) {
-		return -1; /* all written */
-	}
-
-	/* stderr: where stdout goes, unbuffered, and it says how much the stream took */
-	int n = write(2, s->line, s->length);
-
-	if (n < 0) {
-		return -1; /* the console is gone */
-	}
-
-	if (n == 0) {
-		return 5; /* its queue is full: the same line again soon */
-	}
-
-	s->length = 0;
-
-	return 1;
+	return 0;
 }
 
 int top(void *args, int argc, char *argv[])
@@ -340,36 +83,21 @@ int top(void *args, int argc, char *argv[])
 	(void)args;
 
 	if (argc == 2 && strcmp(argv[1], "mem") == 0) {
-		size_t peak, size;
+#if VFS_PROC
+		char buf[32];
+		int fd = open("/proc/mem", O_RDONLY, 0);
+		int n;
 
-		alloc_info();
-
-		if (task_stack(&peak, &size) == 0) {
-			printf("stack %u of %u B\n", (unsigned)peak, (unsigned)size);
+		while (fd >= 0 && (n = read(fd, buf, sizeof(buf))) > 0) {
+			write(1, buf, (unsigned int)n);
 		}
 
-		printf("reset %04X\n", task_reset_cause());
-
-#if LETS_WDT
-		task_t *t = task_get_data();
-		uint32_t now = (uint32_t)task_get_system_time();
-
-		printf("watchdog %u ms, ready tasks %u ms\n", (unsigned)LETS_WDT_MS,
-		       (unsigned)LETS_WDT_DEFAULT_MS);
-
-		for (int i = 0; i < TASKS_MAX_COUNT; i++) {
-			/* the ones that check in (task_watch()), and the ones not watched */
-			if (t[i].state != TASK_UNUSED && (t[i].deadline & TASK_WATCH_ALIVE)) {
-				printf("  %s %u ms, alive %lu ms ago\n", t[i].info.name,
-				       t[i].deadline & ~TASK_WATCH_ALIVE,
-				       (unsigned long)((now - t[i].alive) / 1000u));
-			} else if (t[i].state != TASK_UNUSED && t[i].deadline == 0) {
-				printf("  %s not watched\n", t[i].info.name);
-			}
-		}
-#endif
+		return close(fd);
+#else
+		vfs_proc_mem();
 
 		return 0;
+#endif
 	}
 
 	if (argc != 1) {
@@ -377,27 +105,7 @@ int top(void *args, int argc, char *argv[])
 		return -1;
 	}
 
-	top_t *s = malloc(sizeof(top_t));
+	top_t *s = lines_alloc(sizeof(top_t), top_next);
 
-	if (s == NULL) {
-		printf("out of memory\n");
-		return -1;
-	}
-
-	memset(s, 0, sizeof(top_t));
-
-	/* what the shell has in stdout goes first */
-	fsync(1);
-
-	task_t *t = task_create("top", top_task, s);
-
-	if (t == NULL) {
-		free(s);
-		printf("no free task slot\n");
-		return -1;
-	}
-
-	shell_wait(t);
-
-	return 0;
+	return (s == NULL) ? -1 : lines_spawn("top", &s->lines);
 }

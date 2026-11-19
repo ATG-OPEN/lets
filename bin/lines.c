@@ -128,7 +128,12 @@ int lines_run(const char *name, lines_t *l)
 	}
 
 	/* the stream is full: a task goes on with it, the shell waits for that */
-	task_t *t = task_create(name, lines_task, l);
+	return lines_spawn(name, l);
+}
+
+int lines_spawn(const char *name, lines_t *l)
+{
+	task_t *t = (l == NULL) ? NULL : task_create(name, lines_task, l);
 
 	if (t == NULL) {
 		free(l);
@@ -136,6 +141,7 @@ int lines_run(const char *name, lines_t *l)
 		return -1;
 	}
 
+	fsync(1); /* what stdout already holds goes first */
 	shell_wait(t);
 
 	return 0;

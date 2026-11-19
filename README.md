@@ -63,8 +63,10 @@ heap 104 of 16384 B used (0%)
 
 The demo's shell asks for the password first: the built-in default, `123456`.
 
-`top mem` shows the heap, the most stack ever used, and why the chip last reset (RCON); the
-first line of `top` shows the reset too, e.g. `reset watchdog (hang: shell)`, `reset watchdog (late: link, by:
+`top` and `top mem` are programs reading what only the kernel knows from `/proc`, as on Linux:
+`cat /proc/stat` (top's first line), `/proc/meminfo`, `/proc/mem`, `/proc/<ID>` (a task's row;
+`kill NAME` finds the ID there and calls `kill()`). `top mem` shows the heap, the most stack ever used,
+and why the chip last reset (RCON); the first line of `top` shows the reset too, e.g. `reset watchdog (hang: shell)`, `reset watchdog (late: link, by:
 shell)` or `reset trap 2 (in: shell)`.
 
 `build/lets-demo` is built with `VFS_NO_TFS`, as a small MCU; `./build/lets-vfs-demo` is the

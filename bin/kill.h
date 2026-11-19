@@ -7,11 +7,11 @@
 /**
  * @brief The `kill TASK` command: stops a task by name (see `top`).
  *
- * The task's memory is freed. A task may kill itself; it is not called
- * again.
+ * It finds the task's ID among the rows of /proc (as `pkill` on Linux) and calls kill().
+ * The task's memory is freed. A task may kill itself; it is not called again.
  *
  * @return 0, or -1 when there is no such task.
  */
-int kill(void *args, int argc, char *argv[]);
+int kill_execute(void *args, int argc, char *argv[]);
 
 #endif /* KILL_H */

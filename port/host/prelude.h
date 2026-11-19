@@ -42,6 +42,7 @@
 #define sync   k_sync
 #define fsync  k_fsync
 #define isatty k_isatty
+#define kill   k_kill
 
 /* the kernel's heap has no calloc / realloc (XC16's would use the linker heap, 0 bytes, and
  * return NULL): on a PC too they fail, at link time */

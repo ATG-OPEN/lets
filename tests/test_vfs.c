@@ -657,7 +657,7 @@ static void test_tree(void)
 	CHECK(system("cat rc") == 9 && strcmp(capture("cat rc"), "replaced\n") == 0);
 	CHECK(write(1, "to the console\n", 15) == 15); /* stdout goes to the node `std` gave it */
 	CHECK(system("ls -l") == 1);
-	CHECK(system("ls /") == 5); /* bin dev app tmp mnt */
+	CHECK(system("ls /") == 6); /* bin dev opt tmp mnt proc */
 	CHECK(system("cd /") == 0);
 
 	/* a device that also takes commands (a GPIO, ttyS1 -b) is in /dev, not /bin */
@@ -685,7 +685,7 @@ static void test_tree(void)
 	CHECK(strcmp(type("cat bo\t"), "cat boot.as ") == 0); /* the working directory */
 	CHECK(strcmp(type("std tt\t"), "std ttyS1 ") == 0);   /* not here: a bare name */
 	const char *s = type("ls ../\t");		      /* the directory one up only */
-	CHECK(strstr(s, "\r\nbin/  dev/  opt/  tmp/  mnt/  \r\n") != NULL);
+	CHECK(strstr(s, "\r\nbin/  dev/  opt/  tmp/  mnt/  proc/  \r\n") != NULL);
 	CHECK(strstr(s, "probe") == NULL && strstr(s, "ttyS1") == NULL);
 	CHECK(strcmp(type("ls ../m\t"), "ls ../mnt/") == 0);
 	CHECK(strcmp(type("ls ../mnt/\t"), "ls ../mnt/ee/") == 0); /* the only entry */
@@ -769,8 +769,8 @@ static void test_tree(void)
 	CHECK(strstr(sink, "to the console") != NULL);
 
 	/* ls as on Linux: names only, -p marks the directories, -l the type and rwx */
-	CHECK(strcmp(capture("ls /"), "bin  dev  opt  tmp  mnt\n") == 0);
-	CHECK(strcmp(capture("ls -p /"), "bin/  dev/  opt/  tmp/  mnt/\n") == 0);
+	CHECK(strcmp(capture("ls /"), "bin  dev  opt  tmp  mnt  proc\n") == 0);
+	CHECK(strcmp(capture("ls -p /"), "bin/  dev/  opt/  tmp/  mnt/  proc/\n") == 0);
 	CHECK(strncmp(capture("ls -l /dev/ee0"), "brw-", 4) == 0);
 	CHECK(strncmp(capture("ls -l /dev/ttyS1"), "c-w-", 4) == 0);
 	CHECK(strncmp(capture("ls -l /mnt/ee/rc"), "-rw-", 4) == 0);

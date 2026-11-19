@@ -59,7 +59,12 @@ the PC build and tests (Doxygen for `make docs`, clang-format for `make format`)
   `getcwd`, `mkdir`, `remove`, `rename`, `mount` (`MS_FORMAT`), `umount`, `sync`, `fsync`
   (stdout's line), `isatty` (terminal mode), `reboot` (kernel/task.h). Old names stay as macros
   (`vfs_chdir`, `vfs_mkdir`, `vfs_remove`, `vfs_rename`, `vfs_mount_type`, `vfs_umount`,
-  `vfs_terminal`).
+  `vfs_terminal`). `kill(pid, sig)` (pid = top's ID = task slot; 0 is a task, not a group).
+- **/proc** (`vfs/proc.c`, fs type "proc" mounted by `vfs_initialize()`, `VFS_PROC` 1): `stat`,
+  `meminfo` (top's first lines), `mem` (top mem), `<ID>` (a task's row); `top` reads them line by
+  line in a task of its own (`lines_spawn()`), `kill NAME` scans the rows. Takes one directory
+  slot (VFS_DIRS_MAX default +1). `-DVFS_PROC=0` (PIC24M, flash full) leaves the mount out:
+  `top` asks `vfs_proc_line()` / `vfs_proc_mem()` directly, `kill` uses `task_stop_byname()`.
 - **Shell:** `std [-t] NODE` moves the shell (terminal or link mode), `;` separates commands,
   redirection `<` `>`; commands `ls cd cat echo top kill mv touch rm cp mount df date uptime passwd
   reboot ...`; password asked once per input stream, again after `vfs_peer_new()`; default

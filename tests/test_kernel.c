@@ -517,7 +517,7 @@ static int checks(void *args, uint64_t t)
 	}
 	if (step == 2) {
 		/* the commands (their messages go to the console, sink, here) */
-		vfs_register_app("kill", kill);
+		vfs_register_app("kill", kill_execute);
 		vfs_register_app("top", top);
 		vfs_bin_initialize(); /* ls, cat, echo, mv, touch, rm, ... */
 

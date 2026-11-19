@@ -1269,5 +1269,12 @@ int vfs_initialize(void)
 	vfs_fs_register(&vfs_tfs_type);
 #endif
 
+#if VFS_PROC
+	/* what only the kernel knows, as files (vfs/proc.c) */
+	if (vfs_fs_register(&vfs_proc_type) < 0 || mount("proc", "/proc", "proc", 0, NULL) < 0) {
+		return -1;
+	}
+#endif
+
 	return 0;
 }

@@ -18,6 +18,7 @@
  *   /opt    project applications (vfs_register_app("/opt/trgmon", ...))
  *   /tmp    RAM files (touch), or a file system mounted over it
  *   /mnt    mount points of file systems on SPI EEPROM / SRAM (mount ee0 /mnt/ee)
+ *   /proc   what only the kernel knows, as text: stat, meminfo, mem, a file per task (proc.c)
  *
  * and paths everywhere: open("/mnt/ee/config", O_WRONLY | O_CREAT | O_TRUNC),
  * `cat /mnt/ee/boot.as`, `as /mnt/ee/boot.as`, `cd /tmp`, `ls -l /dev`.
@@ -145,10 +146,11 @@ void vfs_stdout_flush(void);
 #define VFS_DEV	 2u  /**< Directory id of /dev. */
 #define VFS_PATH_MAX 64u /**< Longest path printed by pwd / df. */
 #ifndef VFS_DIRS_MAX
+/* Directories and mount points besides /, /bin and /dev; /proc takes one more (VFS_PROC). */
 #ifdef VFS_NO_TFS
-#define VFS_DIRS_MAX 6u /**< Directories and mount points besides /, /bin and /dev. */
+#define VFS_DIRS_MAX (6u + VFS_PROC)
 #else
-#define VFS_DIRS_MAX 8u /**< Directories and mount points besides /, /bin and /dev. */
+#define VFS_DIRS_MAX (8u + VFS_PROC)
 #endif
 #endif
 #define VFS_DIR_NAME  12u /**< Directory name length, including the 0. */
@@ -466,6 +468,21 @@ int vfs_tfs_crc(void *args, int argc, char *argv[]);
  * @return Its node index, or -1.
  */
 int vfs_tmp_create(const vfs_path_t *p);
+
+/**
+ * @brief A line of `top` (vfs/proc.c) in @p buf, at most @p max bytes with the 0: @p line 0 is
+ * /proc/stat, 1 /proc/meminfo, 2 + k /proc/k (the task in slot k).
+ * @return Its length, 0 for a free slot, -1 past the last slot.
+ */
+int vfs_proc_line(unsigned int line, char *buf, unsigned int max);
+
+/** @brief Prints /proc/mem (`top mem`) to stdout: for a board without /proc (VFS_PROC 0). */
+void vfs_proc_mem(void);
+
+#if VFS_PROC
+/** /proc as a file system type, mounted at /proc by vfs_initialize() (VFS_PROC, 1 by default). */
+extern vfs_fs_type_t vfs_proc_type;
+#endif
 
 /**
  * @brief Sets what runs a script typed as a command, like `#!` on Linux.

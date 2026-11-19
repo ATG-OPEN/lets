@@ -208,6 +208,25 @@ int task_count(void)
 	return count;
 }
 
+/* stops the task in slot @p i: 0, or -1 when there is none (or it is stopping already) */
+static inline __attribute__((always_inline)) int task_stop_slot(int i)
+{
+	task_t *t = &tasks[i];
+
+	if (t->state == TASK_UNUSED || t->state == TASK_STOPPING) {
+		return -1;
+	}
+
+	/* it is running: its memory and streams are in use until it returns */
+	if (i == current) {
+		t->state = TASK_STOPPING;
+	} else {
+		task_release(i);
+	}
+
+	return 0;
+}
+
 /* the first task called @name, and with @arg unless @any */
 static int task_stop_match(const char *name, const void *arg, bool any)
 {
@@ -226,17 +245,24 @@ static int task_stop_match(const char *name, const void *arg, bool any)
 			continue;
 		}
 
-		/* it is running: its memory and streams are in use until it returns */
-		if (i == current) {
-			t->state = TASK_STOPPING;
-		} else {
-			task_release(i);
-		}
-
-		return 0;
+		return task_stop_slot(i);
 	}
 
 	return -1;
+}
+
+/* kill(2): any signal but 0 stops the task, as task_stop_byname() */
+int kill(pid_t pid, int sig)
+{
+	if (pid < 0 || pid >= (pid_t)TASKS_MAX_COUNT) {
+		return -1;
+	}
+
+	if (sig == 0) {
+		return (tasks[pid].state == TASK_UNUSED || tasks[pid].state == TASK_STOPPING) ? -1 : 0;
+	}
+
+	return task_stop_slot((int)pid);
 }
 
 int task_stop_byname(char *name)

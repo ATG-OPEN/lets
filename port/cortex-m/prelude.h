@@ -45,6 +45,7 @@
 #define sync   k_sync
 #define fsync  k_fsync
 #define isatty k_isatty
+#define kill   k_kill
 
 /* the kernel's heap has no calloc / realloc */
 #define calloc	k_calloc_is_not_in_the_kernel

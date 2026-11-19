@@ -15,7 +15,7 @@ PRELUDE = -include port/host/prelude.h
 
 # the kernel, its shell and vfs without tfs (VFS_NO_TFS, as on a small MCU) ...
 KERNEL  = kernel/task.c kernel/alloc.c lib/args.c $(wildcard bin/*.c) \
-          vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/onefs.c
+          vfs/node.c vfs/vfs.c vfs/posix.c vfs/tmp.c vfs/proc.c vfs/onefs.c
 NOFS    = -DVFS_NO_TFS
 
 # ... and with tfs and the memory drivers
@@ -45,6 +45,13 @@ build/test_kernel: tests/test_kernel.c $(KERNEL) | build
 build/test_sleep: tests/test_sleep.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) tests/test_sleep.c $(KERNEL) -o $@
 
+# the POSIX line: /proc, kill(), reboot(), top; and the same without the /proc mount
+build/test_proc: tests/test_proc.c $(KERNEL) | build
+	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) tests/test_proc.c $(KERNEL) -o $@
+
+build/test_proc0: tests/test_proc.c $(KERNEL) | build
+	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DVFS_PROC=0 tests/test_proc.c $(KERNEL) -o $@
+
 # the scheduler's watchdog (LETS_WDT) on a fake clock and a fake watchdog
 build/test_wdt: tests/test_wdt.c $(KERNEL) | build
 	$(CC) $(CFLAGS) $(NOFS) $(SAN) $(PRELUDE) -DLETS_WDT=1 tests/test_wdt.c $(KERNEL) -o $@
@@ -72,10 +79,12 @@ LIBS    = $(wildcard lib/*.c) $(wildcard opt/*.c)
 libs: | build
 	for f in $(LIBS); do $(CC) $(CFLAGS) $(PRELUDE) -Werror -c $$f -o build/$$(basename $$f .c).o || exit 1; done
 
-test: build/test_kernel build/test_sleep build/test_wdt build/test_vfs build/as_test build/test_nrf52 build/test_tty build/test_tty_dpx libs
+test: build/test_kernel build/test_sleep build/test_wdt build/test_proc build/test_proc0 build/test_vfs build/as_test build/test_nrf52 build/test_tty build/test_tty_dpx libs
 	./build/test_kernel
 	./build/test_sleep
 	./build/test_wdt
+	./build/test_proc
+	./build/test_proc0
 	./build/test_vfs
 	./build/as_test
 	./build/test_nrf52
